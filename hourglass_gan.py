@@ -179,10 +179,10 @@ class HourglassModel_gan():
 
             self.loss_d = d_loss_real + d_loss_fake
 
-            with tf.name_scope('linear'):
-                w=tf.get_variable("linear_weigth",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer(maxval=0))
-                b=tf.get_variable("linear_bias",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer())
-                loss_joint_linear=tf.add(tf.multiply(w,self.loss_d),b)
+            # with tf.name_scope('linear'):
+            #     w=tf.get_variable("linear_weigth",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer(maxval=0))
+            #     b=tf.get_variable("linear_bias",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer())
+            #     loss_joint_linear=tf.add(tf.multiply(w,self.loss_d),b)
                 # loss_joint= self._compute_err(self.output_target,self.gtMaps_source)
                 # self.loss_diff=tf.reduce_sum(loss_joint-loss_joint_linear)
 
@@ -343,13 +343,13 @@ class HourglassModel_gan():
                                                                     self.img_target:img_train_target,self.gtMaps_target:gt_train_target,
                                                                     self.weights: weight_train,
                                                                     self.is_training: True})
-                        # _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
-                        #                                         feed_dict={self.img_source: img_train,
-                        #                                                    self.gtMaps_source: gt_train,
-                        #                                                    self.img_target: img_train_target,
-                        #                                                    self.gtMaps_target: gt_train_target,
-                        #                                                    self.weights: weight_train,
-                        #                                                    self.is_training: True})
+                        _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
+                                                                feed_dict={self.img_source: img_train,
+                                                                           self.gtMaps_source: gt_train,
+                                                                           self.img_target: img_train_target,
+                                                                           self.gtMaps_target: gt_train_target,
+                                                                           self.weights: weight_train,
+                                                                           self.is_training: True})
                     else:
                         _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
                                                                     feed_dict={self.img_source: img_train,
@@ -357,12 +357,12 @@ class HourglassModel_gan():
                                                                                self.img_target: img_train_target,
                                                                                self.gtMaps_target: gt_train_target,
                                                                                self.is_training: True})
-                        # _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
-                        #                                         feed_dict={self.img_source: img_train,
-                        #                                                    self.gtMaps_source: gt_train,
-                        #                                                    self.img_target: img_train_target,
-                        #                                                    self.gtMaps_target: gt_train_target,
-                        #                                                    self.is_training: True})
+                        _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
+                                                                feed_dict={self.img_source: img_train,
+                                                                           self.gtMaps_source: gt_train,
+                                                                           self.img_target: img_train_target,
+                                                                           self.gtMaps_target: gt_train_target,
+                                                                           self.is_training: True})
                     # Save summary (Loss + Accuracy)
                     self.train_summary.add_summary(summary_enc, epoch * epochSize + i)
                     self.train_summary.add_summary(summary_d, epoch * epochSize + i)
