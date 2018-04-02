@@ -4,8 +4,18 @@ TRAIN LAUNCHER
 """
 
 import configparser
+from hourglass_gan import HourglassModel_gan
 from hourglass_tiny import HourglassModel
 from datagen import DataGenerator
+from datagen_human36 import DataGenerator_human36
+import argparse
+
+parse = argparse.ArgumentParser()
+
+
+parse.add_argument("--network", help="choose a network", default='hourglass_gan', type=str)
+args = parse.parse_args()
+
 
 def process_config(conf_file):
 	"""
@@ -32,17 +42,54 @@ def process_config(conf_file):
 	return params
 
 
+
 if __name__ == '__main__':
 	print('--Parsing Config File')
 	params = process_config('config.cfg')
-	
-	print('--Creating Dataset')
-	dataset = DataGenerator(params['joint_list'], params['img_directory'], params['training_txt_file'], remove_joints=params['remove_joints'])
-	dataset._create_train_table()
-	dataset._randomize()
-	dataset._create_sets()
-	
-	model = HourglassModel(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'], nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'], attention = params['mcam'],training=True, drop_rate= params['dropout_rate'], lear_rate=params['learning_rate'], decay=params['learning_rate_decay'], decay_step=params['decay_step'], dataset=dataset, name=params['name'], logdir_train=params['log_dir_train'], logdir_test=params['log_dir_test'], tiny= params['tiny'], w_loss=params['weighted_loss'] , joints= params['joint_list'],modif=False)
+	#
+	# print('--Creating Dataset')
+	# dataset = DataGenerator(params['joint_list'], params['img_directory'], params['training_txt_file'], remove_joints=params['remove_joints'])
+	# dataset._create_train_table()
+	# dataset._randomize()
+	# dataset._create_sets()
+	# generator=dataset._aux_generator(16,4,True,'train')
+	#
+	# model = HourglassModel(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'], nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],training=True, drop_rate= params['dropout_rate'], lear_rate=params['learning_rate'], decay=params['learning_rate_decay'], decay_step=params['decay_step'], dataset=dataset, name=params['name'], logdir_train=params['log_dir_train'], logdir_test=params['log_dir_test'],  w_loss=params['weighted_loss'] , joints= params['joint_list'])
+	# model.generate_model()
+	# model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'], dataset = None)
+
+
+	dataset_source = DataGenerator_human36()
+	dataset_target = DataGenerator(params['joint_list'], params['img_directory'], params['training_txt_file'], remove_joints=params['remove_joints'])
+	# model = HourglassModel(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
+	# 					   nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
+	# 					   training=True, drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
+	# 					   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
+	# 					   dataset_source=dataset_source,dataset_target=dataset_target,
+	# 					   name=params['name'], logdir_train=params['log_dir_train'],
+	# 					   logdir_test=params['log_dir_test'], w_loss=params['weighted_loss'],
+	# 					   joints=params['joint_list'])
+	# model.generate_model()
+	# model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=None)
+
+	if args.network=='hourglass_tiny':
+		model = HourglassModel(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
+							   nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
+							   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
+							   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
+							   dataset_source=dataset_source,dataset_target=dataset_target,
+							   name=params['name'], logdir_train=params['log_dir_train'],
+							   logdir_test=params['log_dir_test'], w_loss=params['weighted_loss'],
+							   joints=params['joint_list'])
+	else:
+		model = HourglassModel_gan(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
+							   nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
+							   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
+							   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
+							   dataset_source=dataset_source, dataset_target=dataset_target,
+							   name=params['name'], logdir_train=params['log_dir_train'],
+							   logdir_test=params['log_dir_test'], w_loss=params['weighted_loss'],
+							   joints=params['joint_list'])
 	model.generate_model()
-	model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'], dataset = None)
-	
+	# modelPath='/home/lichen/pose_estimation/hourglasstensorlfow/hourglassModel_tiny_1stack/hg_refined_200_200'
+	model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=None)
