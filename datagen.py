@@ -36,6 +36,7 @@ import time
 from skimage import transform
 import scipy.misc as scm
 
+
 class DataGenerator():
 	""" DataGenerator Class : To generate Train, Validatidation and Test sets
 	for the Deep Human Pose Estimation Model 
@@ -193,6 +194,7 @@ class DataGenerator():
 				self.valid_set.append(elem)
 			else:
 				self.train_set.append(elem)
+
 		print('SET CREATED')
 		np.save('Dataset-Validation-Set', self.valid_set)
 		np.save('Dataset-Training-Set', self.train_set)
@@ -333,7 +335,8 @@ class DataGenerator():
 		"""
 		if random.choice([0,1]): 
 			r_angle = np.random.randint(-1*max_rotation, max_rotation)
-			img = 	transform.rotate(img, r_angle, preserve_range = True)
+			# img = 	transform.rotate(img, r_angle, preserve_range = True)
+			img = transform.rotate(img, r_angle)
 			hm = transform.rotate(hm, r_angle)
 		return img, hm
 	
@@ -363,7 +366,6 @@ class DataGenerator():
 						img = self.open_img(name)
 						joints = self.data_dict[name]['joints']
 						box = self.data_dict[name]['box']
-						weight = self.data_dict[name]['weights']
 						if debug:
 							print(box)
 						padd, cbox = self._crop_data(img.shape[0], img.shape[1], box, joints, boxp = 0.2)
@@ -409,7 +411,7 @@ class DataGenerator():
 			train_weights = np.zeros((batch_size, len(self.joints_list)), np.float32)
 			i = 0
 			while i < batch_size:
-				try:
+				# try:
 					if sample_set == 'train':
 						name = random.choice(self.train_set)
 					elif sample_set == 'valid':
@@ -434,8 +436,8 @@ class DataGenerator():
 						train_img[i] = img.astype(np.float32)
 					train_gtmap[i] = hm
 					i = i + 1
-				except :
-					print('error file: ', name)
+				# except :
+				# 	print('error file: ', name)
 			yield train_img, train_gtmap, train_weights
 					
 	def generator(self, batchSize = 16, stacks = 4, norm = True, sample = 'train'):
@@ -468,7 +470,7 @@ class DataGenerator():
 		else:
 			print('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
 	
-	def plot_img(self, name, plot = 'cv2'):
+	def plot_img(self, name, plot = 'plt'):
 		""" Plot an image
 		Args:
 			name	: Name of the Sample
@@ -505,14 +507,18 @@ class DataGenerator():
 			#rhm = np.zeros((256,256,16))
 			#for i in range(16):
 			#	rhm[:,:,i] = cv2.resize(rHM[:,:,i], (256,256))
-			grimg = cv2.cvtColor(rimg, cv2.COLOR_RGB2GRAY)
-			cv2.imshow('image', grimg / 255 + np.sum(rhm,axis = 2))
+
+			# grimg = cv2.cvtColor(rimg, cv2.COLOR_RGB2GRAY)
+			# cv2.imshow('image', grimg / 255 + np.sum(rhm,axis = 2))
+			plt.imshow(rimg)
+			plt.show()
+
 			# Wait
-			time.sleep(toWait)
-			if cv2.waitKey(1) == 27:
-				print('Ended')
-				cv2.destroyAllWindows()
-				break
+			# time.sleep(toWait)
+			# if cv2.waitKey(1) == 27:
+			# 	print('Ended')
+			# 	cv2.destroyAllWindows()
+			# 	break
 	
 	
 	
@@ -569,6 +575,20 @@ class DataGenerator():
 				return False
 		else:
 			print('Specify a sample name')
+
+	def plot_hotmap(self, hp, gt):
+		hp_one = np.sum(hp, axis=4)
+		gt_one = np.sum(gt, axis=4)
+		for i in range(hp_one.shape[0]):
+			plt.figure()
+			plt.imshow(hp_one[i, 0, :, :], cmap='hot')
+			plt.figure()
+			plt.imshow(gt_one[i, 0, :, :], cmap='hot')
+			plt.show()
 				
 		
-		
+if __name__ == '__main__':
+
+	img_dir='/home/lichen/Downloads/images/'
+	train_data_file='dataset.txt'
+	data_gen=DataGenerator( img_dir=img_dir, train_data_file=train_data_file)
