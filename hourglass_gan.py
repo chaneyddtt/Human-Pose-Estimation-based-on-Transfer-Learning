@@ -26,6 +26,7 @@ Abstract:
 
 	This work is free of use, please cite the author if you use it!
 """
+import logging
 import time
 import tensorflow as tf
 import numpy as np
@@ -42,10 +43,10 @@ class HourglassModel_gan():
     """
 
     def __init__(self, nFeat=512, nStack=4, nModules=1, nLow=3, outputDim=16, batch_size=16, drop_rate=0.2,
-                 lear_rate=2.5e-4, decay=0.96, decay_step=2000, dataset_source = None, dataset_target=None, logdir_train=None,
-                 logdir_test=None, w_loss=False, modif=False, name='hourglass',
+                 lear_rate=2.5e-4, decay=0.96, decay_step=2000, dataset_source = None, dataset_target=None, logdir=None,
+                 w_loss=False, modif=False, name='hourglass',
                  joints=['r_anckle', 'r_knee', 'r_hip', 'l_hip', 'l_knee', 'l_anckle', 'pelvis', 'thorax', 'neck',
-                         'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist']):
+                         'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist'], gpu=0):
         """ Initializer
         Args:
             nStack				: number of stacks (stage/Hourglass modules)
@@ -62,6 +63,7 @@ class HourglassModel_gan():
             modif				: (bool) Boolean to test some network modification # DO NOT USE IT ! USED TO TEST THE NETWORK
             name				: name of the model
         """
+
         self.nStack = nStack
         self.nFeat = nFeat
         self.nModules = nModules
@@ -77,14 +79,17 @@ class HourglassModel_gan():
         self.dataset_source = dataset_source
         self.dataset_target = dataset_target
         self.cpu = '/cpu:0'
-        self.gpu = '/gpu:0'
-        self.logdir_train = logdir_train
-        self.logdir_test = logdir_test
+        self.gpu = '/gpu:%i' % gpu
+        self.logdir = logdir
         self.joints = joints
         self.w_loss = w_loss
         self.dis_name='discriminator'
         self.model_name='hourglass_first'
         self.is_training = tf.placeholder(tf.bool)
+
+        self.logger = logging.getLogger(self.__class__.__name__)  # Logger
+        self.logger.info('Running on GPU: %s' % self.gpu)
+
     # ACCESSOR
 
     def get_input(self):
@@ -282,7 +287,8 @@ class HourglassModel_gan():
 
             for epoch in range(nEpochs):
 
-                print('Epoch :' + str(epoch) + '/' + str(nEpochs) + '\n')
+                print()
+                self.logger.info('Epoch :' + str(epoch) + '/' + str(nEpochs))
             # Validation Set
                 accuracy_array_source = np.array([0.0] * len(self.joint_accur))
                 accuracy_array_target = np.array([0.0] * len(self.joint_accur))
@@ -435,15 +441,20 @@ class HourglassModel_gan():
             logdir_train		: Path to train summary directory
             logdir_test		: Path to test summary directory
         """
-        if (self.logdir_train == None) or (self.logdir_test == None):
+        if (self.logdir == None):
             raise ValueError('Train/Test directory not assigned')
         else:
             with tf.device(self.cpu):
                 self.saver = tf.train.Saver()
             if summary:
+
+                dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                logdir = os.path.join(self.logdir, dn_prefix)
+                self.logger.info('Summaries will be saved to %s' % logdir)
+
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
-                    self.test_summary = tf.summary.FileWriter(self.logdir_test)
+                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
                     # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
 
     def _init_weight(self):
@@ -451,6 +462,7 @@ class HourglassModel_gan():
         """
         print('Session initialization')
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
         t_start = time.time()
         self.Session.run(self.init)
@@ -462,6 +474,7 @@ class HourglassModel_gan():
         print('Session initialization')
         t_start = time.time()
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
         print('Sess initialized in ' + str(int(time.time() - t_start)) + ' sec.')
 
