@@ -9,13 +9,17 @@ from hourglass_tiny import HourglassModel
 from datagen import DataGenerator
 from datagen_human36 import DataGenerator_human36
 import argparse
+import logging, logging.config
 
 parse = argparse.ArgumentParser()
 
-
+# argparse
 parse.add_argument("--network", help="choose a network", default='hourglass_gan', type=str)
+parse.add_argument("--gpu", help="Select GPU (default: 0)", default=0, type=int)
 args = parse.parse_args()
 
+# logging
+logging.config.fileConfig('logging.conf')
 
 def process_config(conf_file):
 	"""
@@ -78,18 +82,18 @@ if __name__ == '__main__':
 							   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
 							   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
 							   dataset_source=dataset_source,dataset_target=dataset_target,
-							   name=params['name'], logdir_train=params['log_dir_train'],
-							   logdir_test=params['log_dir_test'], w_loss=params['weighted_loss'],
-							   joints=params['joint_list'])
+							   name=params['name'], logdir=params['log_dir'],
+                               w_loss=params['weighted_loss'],
+							   joints=params['joint_list'], gpu=args.gpu)
 	else:
 		model = HourglassModel_gan(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
 							   nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
 							   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
 							   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
 							   dataset_source=dataset_source, dataset_target=dataset_target,
-							   name=params['name'], logdir_train=params['log_dir_train'],
-							   logdir_test=params['log_dir_test'], w_loss=params['weighted_loss'],
-							   joints=params['joint_list'])
+							   name=params['name'], logdir=params['log_dir'],
+							   w_loss=params['weighted_loss'],
+							   joints=params['joint_list'], gpu=args.gpu)
 	model.generate_model()
 	# modelPath='/home/lichen/pose_estimation/hourglasstensorlfow/hourglassModel_tiny_1stack/hg_refined_200_200'
 	model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=None)

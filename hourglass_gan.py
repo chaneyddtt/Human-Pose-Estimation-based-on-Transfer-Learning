@@ -26,6 +26,7 @@ Abstract:
 
 	This work is free of use, please cite the author if you use it!
 """
+import logging
 import time
 import tensorflow as tf
 import numpy as np
@@ -42,10 +43,10 @@ class HourglassModel_gan():
     """
 
     def __init__(self, nFeat=512, nStack=4, nModules=1, nLow=3, outputDim=16, batch_size=16, drop_rate=0.2,
-                 lear_rate=2.5e-4, decay=0.96, decay_step=2000, dataset_source = None, dataset_target=None, logdir_train=None,
-                 logdir_test=None, w_loss=False, modif=False, name='hourglass',
+                 lear_rate=2.5e-4, decay=0.96, decay_step=2000, dataset_source = None, dataset_target=None, logdir=None,
+                 w_loss=False, modif=False, name='hourglass',
                  joints=['r_anckle', 'r_knee', 'r_hip', 'l_hip', 'l_knee', 'l_anckle', 'pelvis', 'thorax', 'neck',
-                         'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist']):
+                         'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist'], gpu=0):
         """ Initializer
         Args:
             nStack				: number of stacks (stage/Hourglass modules)
@@ -77,14 +78,17 @@ class HourglassModel_gan():
         self.dataset_source = dataset_source
         self.dataset_target = dataset_target
         self.cpu = '/cpu:0'
-        self.gpu = '/gpu:0'
-        self.logdir_train = logdir_train
-        self.logdir_test = logdir_test
+        self.gpu = '/gpu:%i' % gpu
+        self.logdir = logdir
         self.joints = joints
         self.w_loss = w_loss
         self.dis_name='discriminator'
         self.model_name='hourglass_first'
         self.is_training = tf.placeholder(tf.bool)
+
+        self.logger = logging.getLogger(self.__class__.__name__)  # Logger
+        self.logger.info('Running on GPU: %s' % self.gpu)
+
     # ACCESSOR
 
     def get_input(self):
@@ -282,7 +286,8 @@ class HourglassModel_gan():
 
             for epoch in range(nEpochs):
 
-                print('Epoch :' + str(epoch) + '/' + str(nEpochs) + '\n')
+                print()
+                self.logger.info('Epoch: ' + str(epoch) + '/' + str(nEpochs))
             # Validation Set
                 accuracy_array_source = np.array([0.0] * len(self.joint_accur))
                 accuracy_array_target = np.array([0.0] * len(self.joint_accur))
@@ -309,19 +314,31 @@ class HourglassModel_gan():
                     valid_summary = self.Session.run(self.test_op, feed_dict={self.img_source: img_valid_target2,
                                                                               self.gtMaps_source: gt_valid_target2,
                                                                               self.is_training: False})
-                    self.test_summary.add_summary(valid_summary, epoch)
+                    self.test_summary.add_summary(valid_summary, epoch * epochSize)
                     self.test_summary.flush()
 
                     accuracy_array_source += np.array(accuracy_pred_source, dtype=np.float32)
                     accuracy_array_target += np.array(accuracy_pred_target, dtype=np.float32)
                     accuracy_array_target2 += np.array(accuracy_pred_target2, dtype=np.float32)
+
                 accuracy_array_source = accuracy_array_source / validIter
                 accuracy_array_target = accuracy_array_target / validIter
                 accuracy_array_target2 = accuracy_array_target2 / validIter
-                print('--Avg. Accuracy =', str((np.sum(accuracy_array_source) / len(accuracy_array_source)) * 100)[:6], '%')
-                print('--Avg. Accuracy =', str((np.sum(accuracy_array_target) / len(accuracy_array_target)) * 100)[:6], '%')
-                print(
-                '--Avg. Accuracy =', str((np.sum(accuracy_array_target2) / len(accuracy_array_target2)) * 100)[:6], '%')
+                accuracy_array_source_scalar = np.sum(accuracy_array_source) / len(accuracy_array_source)  # Convert to single scalar
+                accuracy_array_target_scalar = np.sum(accuracy_array_target) / len(accuracy_array_target)
+                accuracy_array_target2_scalar = np.sum(accuracy_array_target2) / len(accuracy_array_target2)
+
+                self.logger.info('Avg. Accuracy (36M, test) = %.3f%%', accuracy_array_source_scalar * 100)
+                self.logger.info('Avg. Accuracy (MP2, train) = %.3f%%', accuracy_array_target_scalar * 100)
+                self.logger.info('Avg. Accuracy (MP2, test) = %.3f%%', accuracy_array_target2_scalar * 100)
+                # Write to writer
+                test_summary_to_write = tf.Summary(value=[
+                    tf.Summary.Value(tag="acc_source", simple_value=accuracy_array_source_scalar),
+                    tf.Summary.Value(tag="acc_target", simple_value=accuracy_array_target_scalar),
+                    tf.Summary.Value(tag="acc_target2", simple_value=accuracy_array_target2_scalar),
+                ])
+                self.test_summary.add_summary(test_summary_to_write, epoch * epochSize)
+
                 self.resume['accur_source'].append(accuracy_array_source)
                 self.resume['accur_target'].append(accuracy_array_target)
                 self.resume['accur_target2'].append(accuracy_array_target2)
@@ -333,9 +350,6 @@ class HourglassModel_gan():
                     sys.stdout.flush()
                     img_train, gt_train, weight_train = next(self.generator_source)
                     img_train_target, gt_train_target, weight_target = next(self.generator_target)
-
-
-
 
                     if self.w_loss:
                         _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
@@ -363,12 +377,12 @@ class HourglassModel_gan():
                                                                            self.img_target: img_train_target,
                                                                            self.gtMaps_target: gt_train_target,
                                                                            self.is_training: True})
+
                     # Save summary (Loss + Accuracy)
-                    self.train_summary.add_summary(summary_enc, epoch * epochSize + i)
-                    self.train_summary.add_summary(summary_d, epoch * epochSize + i)
-                    self.train_summary.flush()
-
-
+                    if i % 20 == 0:
+                        self.train_summary.add_summary(summary_enc, epoch * epochSize + i)
+                        self.train_summary.add_summary(summary_d, epoch * epochSize + i)
+                        self.train_summary.flush()
 
                 with tf.variable_scope('save'):
                     self.saver.save(self.Session, os.path.join(os.getcwd(), str(self.name + '_' + str(epoch + 1))))
@@ -435,35 +449,43 @@ class HourglassModel_gan():
             logdir_train		: Path to train summary directory
             logdir_test		: Path to test summary directory
         """
-        if (self.logdir_train == None) or (self.logdir_test == None):
+        if (self.logdir == None):
             raise ValueError('Train/Test directory not assigned')
         else:
             with tf.device(self.cpu):
                 self.saver = tf.train.Saver()
             if summary:
+
+                dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                logdir = os.path.join(self.logdir, dn_prefix)
+                self.logger.info('Summaries will be saved to %s' % logdir)
+
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
-                    self.test_summary = tf.summary.FileWriter(self.logdir_test)
+                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
+
                     # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
 
     def _init_weight(self):
         """ Initialize weights
         """
-        print('Session initialization')
+        self.logger.info('Session initialization')
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
         t_start = time.time()
         self.Session.run(self.init)
-        print('Sess initialized in ' + str(int(time.time() - t_start)) + ' sec.')
+        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
 
     def _init_session(self):
         """ Initialize Session
         """
-        print('Session initialization')
+        self.logger.info('Session initialization')
         t_start = time.time()
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
-        print('Sess initialized in ' + str(int(time.time() - t_start)) + ' sec.')
+        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
 
     def _graph_hourglass(self, inputs):
         """Create the Network
