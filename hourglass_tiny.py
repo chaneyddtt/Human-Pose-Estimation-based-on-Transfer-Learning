@@ -314,7 +314,7 @@ class HourglassModel():
                 self.resume['err'].append(np.sum(accuracy_array) / len(accuracy_array))
                 valid_summary = self.Session.run(self.test_op, feed_dict={self.img: img_valid, self.gtMaps: gt_valid,
                                                                           self.is_training: False})
-                self.test_summary.add_summary(valid_summary, epoch)
+                self.test_summary.add_summary(valid_summary, epoch * epochSize)
                 self.test_summary.flush()
             print('Training Done')
             print('Resume:' + '\n' + '  Epochs: ' + str(nEpochs) + '\n' + '  n. Images: ' + str(
