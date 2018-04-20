@@ -144,7 +144,7 @@ class DataGenerator_human36():
         self.no_intel = []
         input_file = '/home/lichen/Downloads/HumanPose/Human36/annot_train.h5'
         annot_train = self.getData(input_file)
-        self.loggerinfo('Reading train data')
+        self.logger.info('Reading train data')
         subj=annot_train['subject']
         act=annot_train['action']
         subact=annot_train['subaction']
@@ -172,7 +172,7 @@ class DataGenerator_human36():
         self.valid_table = []
         input_file = '/home/lichen/Downloads/HumanPose/Human36/annot_val.h5'
         annot_train = self.getData(input_file)
-        self.loggerinfo('Reading validation data')
+        self.logger.info('Reading validation data')
         subj = annot_train['subject']
         act = annot_train['action']
         subact = annot_train['subaction']
@@ -226,7 +226,7 @@ class DataGenerator_human36():
             elif set == 'valid':
                 list_file.append(random.choice(self.valid_set))
             else:
-                self.loggererror('Set must be : train/valid')
+                self.logger.error('Set must be : train/valid')
                 break
         return list_file
 
@@ -237,15 +237,15 @@ class DataGenerator_human36():
         """
         self.train_set=[]
         self.valid_set=[]
-        self.loggerinfo('Start set creation')
+        self.logger.info('Start set creation')
 
         self.train_set = [t for t in self.train_table if self._complete_sample(t)]
         self.valid_set = [v for v in self.valid_table if self._complete_sample(v)]
 
-        self.loggerinfo('Set created')
+        self.logger.info('Set created')
 
-        self.loggerinfo('--Training set: %i samples', len(self.train_set))
-        self.loggerinfo('--Validation set: %i samples', len(self.valid_set))
+        self.logger.info('--Training set: %i samples', len(self.train_set))
+        self.logger.info('--Validation set: %i samples', len(self.valid_set))
 
     def generateSet(self, rand=False):
         """ Generate the training and validation set
