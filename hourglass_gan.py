@@ -12,19 +12,19 @@ Created on Mon Jul 10 19:13:56 2017
 @github : https://github.com/wbenbihi/hourglasstensorlfow/
 
 Abstract:
-	This python code creates a Stacked Hourglass Model
-	(Credits : A.Newell et al.)
-	(Paper : https://arxiv.org/abs/1603.06937)
+    This python code creates a Stacked Hourglass Model
+    (Credits : A.Newell et al.)
+    (Paper : https://arxiv.org/abs/1603.06937)
 
-	Code translated from 'anewell' github
-	Torch7(LUA) --> TensorFlow(PYTHON)
-	(Code : https://github.com/anewell/pose-hg-train)
+    Code translated from 'anewell' github
+    Torch7(LUA) --> TensorFlow(PYTHON)
+    (Code : https://github.com/anewell/pose-hg-train)
 
-	Modification are made and explained in the report
-	Goal : Achieve Real Time detection (Webcam)
-	----- Modifications made to obtain faster results (trade off speed/accuracy)
+    Modification are made and explained in the report
+    Goal : Achieve Real Time detection (Webcam)
+    ----- Modifications made to obtain faster results (trade off speed/accuracy)
 
-	This work is free of use, please cite the author if you use it!
+    This work is free of use, please cite the author if you use it!
 """
 import time
 import tensorflow as tf
@@ -37,11 +37,15 @@ import h5py
 
 from hourglass_tiny import HourglassModel
 
+
 class HourglassModel_gan(HourglassModel):
     """ HourglassModel class: (to be renamed)
     Generate TensorFlow model to train and predict Human Pose from images (soon videos)
     Please check README.txt for further information on model management.
     """
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
     def generate_model(self):
         """ Create the complete graph
@@ -129,7 +133,6 @@ class HourglassModel_gan(HourglassModel):
                     self.train_rmsprop_d = self.rmsprop_d.minimize(self.loss_d, self.train_step)
 
         self.init = tf.global_variables_initializer()
-
 
         with tf.device(self.cpu):
             with tf.variable_scope('training'):
@@ -282,28 +285,6 @@ class HourglassModel_gan(HourglassModel):
             print('Training Done')
 
 
-
-    def training_init(self, nEpochs=10, epochSize=1000, saveStep=500, load=None):
-        """ Initialize the training
-        Args:
-            nEpochs		: Number of Epochs to train
-            epochSize		: Size of one Epoch
-            saveStep		: Step to save 'train' summary (has to be lower than epochSize)
-            dataset		: Data Generator (see generator.py)
-            load			: Model to load (None if training from scratch) (see README for further information)
-        """
-        with tf.variable_scope('Session'):
-            with tf.device(self.gpu):
-                self._init_weight()
-                self._define_saver_summary()
-                if load is not None:
-                    self.saver.restore(self.Session, load)
-                    self.test()
-                else:
-                    self._train(nEpochs, epochSize, saveStep, validIter=10)
-
-
-
     def weighted_bce_loss(self):
         """ Create Weighted Loss Function
         WORK IN PROGRESS
@@ -326,53 +307,6 @@ class HourglassModel_gan(HourglassModel):
             self.joint_accur.append(
                 self._accur(self.output_source[:, self.nStack - 1, :, :, i], self.gtMaps_source[:, self.nStack - 1, :, :, i],
                             self.batchSize))
-
-
-
-    def _define_saver_summary(self, summary=True):
-        """ Create Summary and Saver
-        Args:
-            logdir_train		: Path to train summary directory
-            logdir_test		: Path to test summary directory
-        """
-        if (self.logdir == None):
-            raise ValueError('Train/Test directory not assigned')
-        else:
-            with tf.device(self.cpu):
-                self.saver = tf.train.Saver()
-            if summary:
-
-                dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                logdir = os.path.join(self.logdir, dn_prefix)
-                self.logger.info('Summaries will be saved to %s' % logdir)
-
-                with tf.device(self.gpu):
-                    # self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
-                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'))  # Do not save graph for speed
-                    self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
-
-                    # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
-
-    def _init_weight(self):
-        """ Initialize weights
-        """
-        self.logger.info('Session initialization')
-        config = tf.ConfigProto(allow_soft_placement=True)
-        config.gpu_options.allow_growth = True
-        self.Session = tf.Session(config=config)
-        t_start = time.time()
-        self.Session.run(self.init)
-        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
-
-    def _init_session(self):
-        """ Initialize Session
-        """
-        self.logger.info('Session initialization')
-        t_start = time.time()
-        config = tf.ConfigProto(allow_soft_placement=True)
-        config.gpu_options.allow_growth = True
-        self.Session = tf.Session(config=config)
-        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
 
     def discriminator(self, input, trainable=True, is_training=True):
 

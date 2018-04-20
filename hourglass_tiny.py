@@ -161,8 +161,6 @@ class HourglassModel():
             with tf.variable_scope('transfer_model'):
                 self.output_source, self.enc_repre_source = self._graph_hourglass(self.img)
 
-            graphTime = time.time()
-            print('---Graph : Done (' + str(int(abs(graphTime - inputTime))) + ' sec.)')
             with tf.variable_scope('loss'):
                 if self.w_loss:
                     self.loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')
@@ -170,35 +168,24 @@ class HourglassModel():
                     self.loss = tf.reduce_mean(
                         tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps),
                         name='cross_entropy_loss')
-            lossTime = time.time()
-            print('---Loss : Done (' + str(int(abs(graphTime - lossTime))) + ' sec.)')
+
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
                 self._accuracy_computation()
-
-            accurTime = time.time()
-            print('---Acc : Done (' + str(int(abs(accurTime - lossTime))) + ' sec.)')
             with tf.variable_scope('steps'):
                 self.train_step = tf.Variable(0, name='global_step', trainable=False)
             with tf.variable_scope('lr'):
                 self.lr = tf.train.exponential_decay(self.learning_rate, self.train_step, self.decay_step, self.decay,
                                                      staircase=True, name='learning_rate')
-            lrTime = time.time()
-            print('---LR : Done (' + str(int(abs(accurTime - lrTime))) + ' sec.)')
         with tf.device(self.gpu):
             with tf.variable_scope('rmsprop'):
                 self.rmsprop = tf.train.RMSPropOptimizer(learning_rate=self.lr)
-            optimTime = time.time()
-            print('---Optim : Done (' + str(int(abs(optimTime - lrTime))) + ' sec.)')
             with tf.variable_scope('minimizer'):
                 self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 with tf.control_dependencies(self.update_ops):
                     self.train_rmsprop = self.rmsprop.minimize(self.loss, self.train_step)
-            minimTime = time.time()
-            print('---Minimizer : Done (' + str(int(abs(optimTime - minimTime))) + ' sec.)')
         self.init = tf.global_variables_initializer()
-        initTime = time.time()
-        print('---Init : Done (' + str(int(abs(initTime - minimTime))) + ' sec.)')
+
         with tf.device(self.cpu):
             with tf.variable_scope('training'):
                 tf.summary.scalar('loss', self.loss, collections=['train'])
@@ -209,9 +196,7 @@ class HourglassModel():
         self.train_op = tf.summary.merge_all('train')
         self.test_op = tf.summary.merge_all('test')
         self.weight_op = tf.summary.merge_all('weight')
-        endTime = time.time()
-        print('Model created (' + str(int(abs(endTime - startTime))) + ' sec.)')
-        del endTime, startTime, initTime, optimTime, minimTime, lrTime, accurTime, lossTime, graphTime, inputTime
+
 
     def restore(self, load=None):
         """ Restore a pretrained model
@@ -352,18 +337,12 @@ class HourglassModel():
         """
         with tf.variable_scope('Session'):
             with tf.device(self.gpu):
-
+                self._init_weight()
                 self._define_saver_summary()
                 if load is not None:
-                    self._init_session()
                     self.saver.restore(self.Session, load)
                     self.test()
-                # try:
-                #	self.saver.restore(self.Session, load)
-                # except Exception:
-                #	print('Loading Failed! (Check README file for further information)')
                 else:
-                    self._init_weight()
                     self._train(nEpochs, epochSize, saveStep, validIter=10)
 
     def weighted_bce_loss(self):
@@ -393,7 +372,7 @@ class HourglassModel():
             logdir_train		: Path to train summary directory
             logdir_test		: Path to test summary directory
         """
-        if (self.logdir == None):
+        if self.logdir is None:
             raise ValueError('Train/Test directory not assigned')
         else:
             with tf.device(self.cpu):
@@ -405,9 +384,11 @@ class HourglassModel():
                 self.logger.info('Summaries will be saved to %s' % logdir)
 
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    # self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'))  # Do not save graph for speed
                     self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
                     # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
+
 
     def _init_weight(self):
         """ Initialize weights
