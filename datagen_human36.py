@@ -27,6 +27,7 @@ Abstract:
         This work is free of use, please cite the author if you use it!
 
 """
+import logging, logging.config
 import numpy as np
 import cv2
 import os
@@ -111,6 +112,9 @@ class DataGenerator_human36():
         self.edges = [[0, 1], [1, 2], [2, 6], [6, 3], [3, 4], [4, 5],
                  [10, 11], [11, 12], [12, 8], [8, 13], [13, 14], [14, 15],
                  [6, 8], [8, 9]]
+        self.data_dict = {}
+
+        self.logger = logging.getLogger(self.__class__.__name__)  # Logger
 
     # --------------------Generator Initialization Methods ---------------------
 
@@ -138,30 +142,29 @@ class DataGenerator_human36():
         """
         self.train_table = []
         self.no_intel = []
-        self.data_dict = {}
         input_file = '/home/lichen/Downloads/HumanPose/Human36/annot_train.h5'
         annot_train = self.getData(input_file)
-        print('READING TRAIN DATA')
+        logging.info('Reading train data')
         subj=annot_train['subject']
         act=annot_train['action']
         subact=annot_train['subaction']
         cam=annot_train['camera']
         id= annot_train['id']
+
+        names = ['s_%02d_act_%02d_subact_%02d_ca_%02d_%06d.jpg' % (subj[i], act[i], subact[i], cam[i], id[i]) for i in range(len(id))]
+        self.data_dict.update(dict.fromkeys(names))
+
         for index in range(len(id)):
-            name= 's_%02d_act_%02d_subact_%02d_ca_%02d_%06d.jpg' % (subj[index], act[index], subact[index], cam[index], id[index])
             box=  annot_train['bbox'][index]
             joints= annot_train['joint_2d'][index]
             if self.toReduce:
                 joints = self._reduce_joints(joints)
-            if joints == [-1] * len(joints):
-                self.no_intel.append(name)
+            if np.all(joints == -1):
+                self.no_intel.append(names[index])
             else:
-                w = [1] * joints.shape[0]
-                for i in range(joints.shape[0]):
-                    if np.array_equal(joints[i], [-1, -1]):
-                        w[i] = 0
-                self.data_dict[name] = {'box': box, 'joints': joints, 'weights': w}
-                self.train_table.append(name)
+                w = (joints[:, 0] != -1).astype(np.int)
+                self.data_dict[names[index]] = {'box': box, 'joints': joints, 'weights': w}
+                self.train_table.append(names[index])
 
     def _create_valid_table(self):
         """ Create Table of samples from TEXT file
@@ -169,28 +172,27 @@ class DataGenerator_human36():
         self.valid_table = []
         input_file = '/home/lichen/Downloads/HumanPose/Human36/annot_val.h5'
         annot_train = self.getData(input_file)
-        print('READING VALID DATA')
+        logging.info('Reading validation data')
         subj = annot_train['subject']
         act = annot_train['action']
         subact = annot_train['subaction']
         cam = annot_train['camera']
         id = annot_train['id']
+
+        names = ['s_%02d_act_%02d_subact_%02d_ca_%02d_%06d.jpg' % (subj[i], act[i], subact[i], cam[i], id[i]) for i in range(len(id))]
+        self.data_dict.update(dict.fromkeys(names))
+
         for index in range(len(id)):
-            name = 's_%02d_act_%02d_subact_%02d_ca_%02d_%06d.jpg' % (
-            subj[index], act[index], subact[index], cam[index], id[index])
             box = annot_train['bbox'][index]
             joints = annot_train['joint_2d'][index]
             if self.toReduce:
                 joints = self._reduce_joints(joints)
-            if joints == [-1] * len(joints):
-                self.no_intel.append(name)
+            if np.all(joints == -1):  # if joints == [-1] * len(joints):
+                self.no_intel.append(names[index])
             else:
-                w = [1] * joints.shape[0]
-                for i in range(joints.shape[0]):
-                    if np.array_equal(joints[i], [-1, -1]):
-                        w[i] = 0
-                self.data_dict[name] = {'box': box, 'joints': joints, 'weights': w}
-                self.valid_table.append(name)
+                w = (joints[:, 0] != -1).astype(np.int)
+                self.data_dict[names[index]] = {'box': box, 'joints': joints, 'weights': w}
+                self.valid_table.append(names[index])
 
     def _randomize(self):
         """ Randomize the set
@@ -202,10 +204,14 @@ class DataGenerator_human36():
         Args:
             name 	: Name of the sample
         """
-        for i in range(self.data_dict[name]['joints'].shape[0]):
-            if np.array_equal(self.data_dict[name]['joints'][i], [-1, -1]):
-                return False
-        return True
+
+        # for i in range(self.data_dict[name]['joints'].shape[0]):
+        #     if np.array_equal(self.data_dict[name]['joints'][i], [-1, -1]):
+        #         return False
+        # return True
+
+        return (not np.any(self.data_dict[name]['joints'] < 0))
+
 
     def _give_batch_name(self, batch_size=16, set='train'):
         """ Returns a List of Samples
@@ -220,7 +226,7 @@ class DataGenerator_human36():
             elif set == 'valid':
                 list_file.append(random.choice(self.valid_set))
             else:
-                print('Set must be : train/valid')
+                logging.error('Set must be : train/valid')
                 break
         return list_file
 
@@ -231,17 +237,15 @@ class DataGenerator_human36():
         """
         self.train_set=[]
         self.valid_set=[]
-        print('START SET CREATION')
-        for train_sam in self.train_table:
-            if self._complete_sample(train_sam):
-                self.train_set.append(train_sam)
-        for valid_sam in self.valid_table:
-            if self._complete_sample(valid_sam):
-                self.valid_set.append(valid_sam)
-        print('SET CREATED')
+        logging.info('Start set creation')
 
-        print('--Training set :', len(self.train_set), ' samples.')
-        print('--Validation set :', len(self.valid_set), ' samples.')
+        self.train_set = [t for t in self.train_table if self._complete_sample(t)]
+        self.valid_set = [v for v in self.valid_table if self._complete_sample(v)]
+
+        logging.info('Set created')
+
+        logging.info('--Training set: %i samples', len(self.train_set))
+        logging.info('--Validation set: %i samples', len(self.valid_set))
 
     def generateSet(self, rand=False):
         """ Generate the training and validation set
@@ -375,7 +379,7 @@ class DataGenerator_human36():
                 elif sample_set == 'valid':
                     name = random.choice(self.valid_set)
                 joints = self.data_dict[name]['joints']
-                weight = np.asarray(self.data_dict[name]['weights'])
+                weight = self.data_dict[name]['weights']
                 train_weights[i] = weight
                 img = self.open_img(name)
                 joints = self._relative_joints(224, joints, to_size=64)
@@ -481,30 +485,32 @@ class DataGenerator_human36():
 
 if __name__ == '__main__':
 
-    # data_gen=DataGenerator_human36()
-    # data_gen.generateSet()
-    # for name in data_gen.data_dict:
-    #     data_gen.plot_img(name)
-    #     # img = self.open_img(name)
-    #     # joints = self.data_dict[name]['joints']
-    #     # img = img.astype(np.uint8)
-    #     # img = scm.imresize(img, (256, 256))
-    #     joints = data_gen.data_dict[name]['joints']
-    #     joints = data_gen._relative_joints(224, joints, to_size=64)
-    #     weight = data_gen.data_dict[name]['weights']
-    #     hm= data_gen._generate_hm(64, 64, joints, 64, weight)
-    #     hm=np.sum(hm,axis=2)
-    #     plt.imshow(hm, cmap='hot')
-    #     plt.show()
-    # generator=data_gen._aux_generator(4,4,True,'train')
-    # img_train, gt_train, weight_train = next(generator)
-    # gt_train=np.sum(gt_train,axis=4)
-    # for i in range(img_train.shape[0]):
-    #     plt.figure()
-    #     plt.imshow(img_train[i,:,:,:]*255)
-    #     plt.figure()
-    #     plt.imshow(gt_train[0,i,:,:]*255,cmap='hot')
-    #     plt.show()
+    logging.config.fileConfig('logging.conf')
+
+    data_gen=DataGenerator_human36()
+    data_gen.generateSet()
+    for name in data_gen.data_dict:
+        data_gen.plot_img(name)
+        # img = self.open_img(name)
+        # joints = self.data_dict[name]['joints']
+        # img = img.astype(np.uint8)
+        # img = scm.imresize(img, (256, 256))
+        joints = data_gen.data_dict[name]['joints']
+        joints = data_gen._relative_joints(224, joints, to_size=64)
+        weight = data_gen.data_dict[name]['weights']
+        hm= data_gen._generate_hm(64, 64, joints, 64, weight)
+        hm=np.sum(hm,axis=2)
+        plt.imshow(hm, cmap='hot')
+        plt.show()
+    generator=data_gen._aux_generator(4,4,True,'train')
+    img_train, gt_train, weight_train = next(generator)
+    gt_train=np.sum(gt_train,axis=4)
+    for i in range(img_train.shape[0]):
+        plt.figure()
+        plt.imshow(img_train[i,:,:,:]*255)
+        plt.figure()
+        plt.imshow(gt_train[0,i,:,:]*255,cmap='hot')
+        plt.show()
 
     path=os.path.join(os.getcwd(),'/models/' ,'haha_0')
     print (path)

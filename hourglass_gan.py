@@ -266,7 +266,6 @@ class HourglassModel_gan():
         """
         with tf.name_scope('Train'):
 
-
             self.dataset_source.generateSet()
             self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
                                                                        sample_set='train')
@@ -462,7 +461,8 @@ class HourglassModel_gan():
                 self.logger.info('Summaries will be saved to %s' % logdir)
 
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    # self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
+                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'))  # Do not save graph for speed
                     self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
 
                     # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
