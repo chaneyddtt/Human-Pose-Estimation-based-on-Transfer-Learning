@@ -62,8 +62,7 @@ class HourglassModel():
             modif				: (bool) Boolean to test some network modification # DO NOT USE IT ! USED TO TEST THE NETWORK
             name				: name of the model
         """
-
-        self.nStack = nStack
+        self.nStack = nStack  # Excludes hourglass_0, i.e. even if nStack is 1, there will be 2 hourglasses
         self.nFeat = nFeat
         self.nModules = nModules
         self.outDim = outputDim
@@ -82,6 +81,8 @@ class HourglassModel():
         self.logdir = logdir
         self.joints = joints
         self.w_loss = w_loss
+        self.dis_name='discriminator'
+        self.model_name='hourglass_first'
         self.is_training = tf.placeholder(tf.bool)
 
         self.logger = logging.getLogger(self.__class__.__name__)  # Logger
@@ -143,7 +144,7 @@ class HourglassModel():
         startTime = time.time()
         print('CREATE MODEL:')
         with tf.device(self.gpu):
-            with tf.name_scope('inputs'):
+            with tf.variable_scope('inputs'):
                 # Shape Input Image - batchSize: None, height: 256, width: 256, channel: 3 (RGB)
                 self.img = tf.placeholder(dtype=tf.float32, shape=(None, 256, 256, 3), name='input_img')
 
@@ -162,7 +163,7 @@ class HourglassModel():
 
             graphTime = time.time()
             print('---Graph : Done (' + str(int(abs(graphTime - inputTime))) + ' sec.)')
-            with tf.name_scope('loss'):
+            with tf.variable_scope('loss'):
                 if self.w_loss:
                     self.loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')
                 else:
@@ -172,24 +173,24 @@ class HourglassModel():
             lossTime = time.time()
             print('---Loss : Done (' + str(int(abs(graphTime - lossTime))) + ' sec.)')
         with tf.device(self.cpu):
-            with tf.name_scope('accuracy'):
+            with tf.variable_scope('accuracy'):
                 self._accuracy_computation()
 
             accurTime = time.time()
             print('---Acc : Done (' + str(int(abs(accurTime - lossTime))) + ' sec.)')
-            with tf.name_scope('steps'):
+            with tf.variable_scope('steps'):
                 self.train_step = tf.Variable(0, name='global_step', trainable=False)
-            with tf.name_scope('lr'):
+            with tf.variable_scope('lr'):
                 self.lr = tf.train.exponential_decay(self.learning_rate, self.train_step, self.decay_step, self.decay,
                                                      staircase=True, name='learning_rate')
             lrTime = time.time()
             print('---LR : Done (' + str(int(abs(accurTime - lrTime))) + ' sec.)')
         with tf.device(self.gpu):
-            with tf.name_scope('rmsprop'):
+            with tf.variable_scope('rmsprop'):
                 self.rmsprop = tf.train.RMSPropOptimizer(learning_rate=self.lr)
             optimTime = time.time()
             print('---Optim : Done (' + str(int(abs(optimTime - lrTime))) + ' sec.)')
-            with tf.name_scope('minimizer'):
+            with tf.variable_scope('minimizer'):
                 self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 with tf.control_dependencies(self.update_ops):
                     self.train_rmsprop = self.rmsprop.minimize(self.loss, self.train_step)
@@ -199,10 +200,10 @@ class HourglassModel():
         initTime = time.time()
         print('---Init : Done (' + str(int(abs(initTime - minimTime))) + ' sec.)')
         with tf.device(self.cpu):
-            with tf.name_scope('training'):
+            with tf.variable_scope('training'):
                 tf.summary.scalar('loss', self.loss, collections=['train'])
                 tf.summary.scalar('learning_rate', self.lr, collections=['train'])
-            with tf.name_scope('summary'):
+            with tf.variable_scope('summary'):
                 for i in range(len(self.joints)):
                     tf.summary.scalar(self.joints[i], self.joint_accur[i], collections=['train', 'test'])
         self.train_op = tf.summary.merge_all('train')
@@ -217,7 +218,7 @@ class HourglassModel():
         Args:
             load	: Model to load (None if training from scratch) (see README for further information)
         """
-        with tf.name_scope('Session'):
+        with tf.variable_scope('Session'):
             with tf.device(self.gpu):
                 self._init_session()
                 self._define_saver_summary(summary=False)
@@ -232,7 +233,7 @@ class HourglassModel():
     def _train(self, nEpochs=10, epochSize=1000, saveStep=500, validIter=10):
         """
         """
-        with tf.name_scope('Train'):
+        with tf.variable_scope('Train'):
 
             self.dataset_source.generateSet()
             self.generator = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
@@ -298,7 +299,7 @@ class HourglassModel():
                 print('Epoch ' + str(epoch) + '/' + str(nEpochs) + ' done in ' + str(
                     int(epochfinishTime - epochstartTime)) + ' sec.' + ' -avg_time/batch: ' + str(
                     ((epochfinishTime - epochstartTime) / epochSize))[:4] + ' sec.')
-                with tf.name_scope('save'):
+                with tf.variable_scope('save'):
                     self.saver.save(self.Session, os.path.join(os.getcwd(), str(self.name + '_' + str(epoch + 1))))
                 self.resume['loss'].append(cost)
                 # Validation Set
@@ -349,7 +350,7 @@ class HourglassModel():
             dataset		: Data Generator (see generator.py)
             load			: Model to load (None if training from scratch) (see README for further information)
         """
-        with tf.name_scope('Session'):
+        with tf.variable_scope('Session'):
             with tf.device(self.gpu):
 
                 self._define_saver_summary()
@@ -411,30 +412,34 @@ class HourglassModel():
     def _init_weight(self):
         """ Initialize weights
         """
-        print('Session initialization')
+        self.logger.info('Session initialization')
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
         t_start = time.time()
         self.Session.run(self.init)
-        print('Sess initialized in ' + str(int(time.time() - t_start)) + ' sec.')
+        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
 
     def _init_session(self):
         """ Initialize Session
         """
-        print('Session initialization')
+        self.logger.info('Session initialization')
         t_start = time.time()
         config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
         self.Session = tf.Session(config=config)
-        print('Sess initialized in ' + str(int(time.time() - t_start)) + ' sec.')
+        self.logger.info('Sess initialized in %.2f sec' % (time.time() - t_start))
 
-    def _graph_hourglass(self, inputs, reuse=False):
+    def _graph_hourglass(self, inputs):
         """Create the Network
         Args:
             inputs : TF Tensor (placeholder) of shape (None, 256, 256, 3) #TODO : Create a parameter for customize size
         """
-
-        with tf.name_scope('model'):
-            with tf.name_scope('preprocessing'):
+        with tf.variable_scope('hourglass'):
+        # with tf.name_scope(name=self.model_name,reuse=reuse):
+            # if (reuse):
+                # vs.reuse_variables()
+            with tf.variable_scope('preprocessing'):
                 # Input Dim : nbImages x 256 x 256 x 3
                 pad1 = tf.pad(inputs, [[0, 0], [2, 2], [2, 2], [0, 0]], name='pad_1')
                 # Dim pad1 : nbImages x 260 x 260 x 3
@@ -457,11 +462,10 @@ class HourglassModel():
             out_ = [None] * self.nStack
             sum_ = [None] * self.nStack
 
-            with tf.name_scope('stacks'):
-                with tf.name_scope('stage_0'):
+            with tf.variable_scope('stacks'):
+                with tf.variable_scope('stage_0'):
                     hg[0], enc_repre[0] = self._hourglass(r3, self.nLow, self.nFeat, 'hourglass')
-                    drop[0] = tf.layers.dropout(hg[0], rate=self.dropout_rate, training=self.is_training,
-                                                name='dropout')
+                    drop[0] = tf.layers.dropout(hg[0], rate=self.dropout_rate, training=self.is_training, name='dropout')
                     ll[0] = self._conv_bn_relu(drop[0], self.nFeat, 1, 1, 'VALID', name='conv')
                     ll_[0] = self._conv(ll[0], self.nFeat, 1, 1, 'VALID', 'll')
                     if self.modif:
@@ -471,8 +475,8 @@ class HourglassModel():
                         out[0] = self._conv(ll[0], self.outDim, 1, 1, 'VALID', 'out')
                     out_[0] = self._conv(out[0], self.nFeat, 1, 1, 'VALID', 'out_')
                     sum_[0] = tf.add_n([out_[0], r3, ll_[0]], name='merge')
-                for i in range(1, self.nStack - 1):
-                    with tf.name_scope('stage_' + str(i)):
+                for i in range(1, self.nStack):
+                    with tf.variable_scope('stage_' + str(i)):
                         hg[i], enc_repre[i] = self._hourglass(sum_[i - 1], self.nLow, self.nFeat, 'hourglass')
                         drop[i] = tf.layers.dropout(hg[i], rate=self.dropout_rate, training=self.is_training,
                                                     name='dropout')
@@ -484,7 +488,7 @@ class HourglassModel():
                             out[i] = self._conv(ll[i], self.outDim, 1, 1, 'VALID', 'out')
                         out_[i] = self._conv(out[i], self.nFeat, 1, 1, 'VALID', 'out_')
                         sum_[i] = tf.add_n([out_[i], sum_[i - 1], ll_[0]], name='merge')
-                with tf.name_scope('stage_' + str(self.nStack - 1)):
+                with tf.variable_scope('stage_' + str(self.nStack)):
                     hg[self.nStack - 1], enc_repre[self.nStack - 1] = self._hourglass(sum_[self.nStack - 2], self.nLow,
                                                                                       self.nFeat, 'hourglass')
                     drop[self.nStack - 1] = tf.layers.dropout(hg[self.nStack - 1], rate=self.dropout_rate,
@@ -512,10 +516,10 @@ class HourglassModel():
         Returns:
             conv			: Output Tensor (Convolved Input)
         """
-        with tf.name_scope(name):
+        with tf.variable_scope(name):
             # Kernel for convolution, Xavier Initialisation
-            kernel = tf.Variable(tf.contrib.layers.xavier_initializer(uniform=False)(
-                [kernel_size, kernel_size, inputs.get_shape().as_list()[3], filters]), name='weights')
+            kernel = tf.get_variable('weights', [kernel_size, kernel_size, inputs.get_shape().as_list()[3], filters],
+                                     initializer=tf.contrib.layers.xavier_initializer(uniform=False))
             conv = tf.nn.conv2d(inputs, kernel, [1, strides, strides, 1], padding=pad, data_format='NHWC')
             return conv
 
@@ -531,9 +535,9 @@ class HourglassModel():
         Returns:
             norm			: Output Tensor
         """
-        with tf.name_scope(name):
-            kernel = tf.Variable(tf.contrib.layers.xavier_initializer(uniform=False)(
-                [kernel_size, kernel_size, inputs.get_shape().as_list()[3], filters]), name='weights')
+        with tf.variable_scope(name):
+            kernel = tf.get_variable('weights', [kernel_size, kernel_size, inputs.get_shape().as_list()[3], filters],
+                                     initializer=tf.contrib.layers.xavier_initializer(uniform=False))
             conv = tf.nn.conv2d(inputs, kernel, [1, strides, strides, 1], padding='VALID', data_format='NHWC')
             norm = tf.contrib.layers.batch_norm(conv, 0.9, epsilon=1e-5, activation_fn=tf.nn.relu,
                                                 is_training=self.is_training)
@@ -549,17 +553,17 @@ class HourglassModel():
             conv_3	: Output Tensor
         """
 
-        with tf.name_scope(name):
-            with tf.name_scope('norm_1'):
+        with tf.variable_scope(name):
+            with tf.variable_scope('norm_1'):
                 norm_1 = tf.contrib.layers.batch_norm(inputs, 0.9, epsilon=1e-5, activation_fn=tf.nn.relu,
                                                       is_training=self.is_training)
                 conv_1 = self._conv(norm_1, int(numOut / 2), kernel_size=1, strides=1, pad='VALID', name='conv')
-            with tf.name_scope('norm_2'):
+            with tf.variable_scope('norm_2'):
                 norm_2 = tf.contrib.layers.batch_norm(conv_1, 0.9, epsilon=1e-5, activation_fn=tf.nn.relu,
                                                       is_training=self.is_training)
                 pad = tf.pad(norm_2, np.array([[0, 0], [1, 1], [1, 1], [0, 0]]), name='pad')
                 conv_2 = self._conv(pad, int(numOut / 2), kernel_size=3, strides=1, pad='VALID', name='conv')
-            with tf.name_scope('norm_3'):
+            with tf.variable_scope('norm_3'):
                 norm_3 = tf.contrib.layers.batch_norm(conv_2, 0.9, epsilon=1e-5, activation_fn=tf.nn.relu,
                                                       is_training=self.is_training)
                 conv_3 = self._conv(norm_3, int(numOut), kernel_size=1, strides=1, pad='VALID', name='conv')
@@ -574,7 +578,7 @@ class HourglassModel():
         Returns:
             Tensor of shape (None, inputs.height, inputs.width, numOut)
         """
-        with tf.name_scope(name):
+        with tf.variable_scope(name):
             if inputs.get_shape().as_list()[3] == numOut:
                 return inputs
             else:
@@ -588,7 +592,7 @@ class HourglassModel():
             numOut	: Number of Output Features (channels)
             name	: Name of the block
         """
-        with tf.name_scope(name):
+        with tf.variable_scope(name):
             convb = self._conv_block(inputs, numOut)
             skipl = self._skip_layer(inputs, numOut)
             if self.modif:
@@ -604,7 +608,7 @@ class HourglassModel():
             numOut	: Number of Output Features (channels)
             name	: Name of the block
         """
-        with tf.name_scope(name):
+        with tf.variable_scope(name):
             # Upper Branch
             up_1 = self._residual(inputs, numOut, name='up_1')
             # Lower Branch
@@ -667,7 +671,7 @@ class HourglassModel():
     def test(self, validIter=10):
         """
         """
-        with tf.name_scope('Test'):
+        with tf.variable_scope('Test'):
             self.dataset_source.generateSet()
             self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
                                                                        sample_set='train')
