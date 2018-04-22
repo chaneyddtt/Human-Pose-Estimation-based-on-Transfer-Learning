@@ -98,7 +98,7 @@ class HourglassModel():
         Warning:
             Be sure to build the model first
         """
-        return self.img
+        return self.img_source
 
     def get_output(self):
         """ Returns Output Tensor
@@ -118,7 +118,7 @@ class HourglassModel():
         Warning:
             Be sure to build the model first
         """
-        return self.gtMaps
+        return self.gtMaps_source
 
     def get_loss(self):
         """ Returns Loss Tensor
@@ -146,12 +146,13 @@ class HourglassModel():
         with tf.device(self.gpu):
             with tf.variable_scope('inputs'):
                 # Shape Input Image - batchSize: None, height: 256, width: 256, channel: 3 (RGB)
-                self.img = tf.placeholder(dtype=tf.float32, shape=(None, 256, 256, 3), name='input_img')
+                self.img_source = tf.placeholder(dtype=tf.float32, shape=(None, 256, 256, 3), name='input_img')
 
                 if self.w_loss:
                     self.weights = tf.placeholder(dtype=tf.float32, shape=(None, self.outDim))
                 # Shape Ground Truth Map: batchSize x nStack x 64 x 64 x outDim
-                self.gtMaps = tf.placeholder(dtype=tf.float32, shape=(None, self.nStack, 64, 64, self.outDim))
+                self.gtMaps_source = tf.placeholder(dtype=tf.float32, shape=(None, self.nStack, 64, 64, self.outDim))
+
             # TODO : Implement weighted loss function
             # NOT USABLE AT THE MOMENT
             # weights = tf.placeholder(dtype = tf.float32, shape = (None, self.nStack, 1, 1, self.outDim))
@@ -159,14 +160,14 @@ class HourglassModel():
             print('---Inputs : Done (' + str(int(abs(inputTime - startTime))) + ' sec.)')
 
             with tf.variable_scope('transfer_model'):
-                self.output_source, self.enc_repre_source = self._graph_hourglass(self.img)
+                self.output_source, self.enc_repre_source = self._graph_hourglass(self.img_source)
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
                     self.loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')
                 else:
                     self.loss = tf.reduce_mean(
-                        tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps),
+                        tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
                         name='cross_entropy_loss')
 
         with tf.device(self.cpu):
@@ -221,110 +222,120 @@ class HourglassModel():
         with tf.variable_scope('Train'):
 
             self.dataset_source.generateSet()
-            self.generator = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                sample_set='train')
-            self.valid_gen = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                sample_set='valid')
-            startTime = time.time()
+            self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
+                                                                       sample_set='train')
+            self.validgen_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
+                                                                   sample_set='valid')
+
+            self.dataset_target.generateSet()
+            self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
+                                                                       sample_set='train')
+            self.validgen_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
+                                                                   sample_set='valid')
             self.resume = {}
-            self.resume['accur'] = []
-            self.resume['loss'] = []
-            self.resume['err'] = []
+            self.resume['accur_source'] = []
+            self.resume['accur_target'] = []
+            self.resume['accur_target2'] = []
+            # self.resume['err'] = []
+
+
             for epoch in range(nEpochs):
-                epochstartTime = time.time()
-                avg_cost = 0.
-                cost = 0.
-                print('starting training hourglass network')
-                print('Epoch :' + str(epoch) + '/' + str(nEpochs) + '\n')
+
+                print()
+                self.logger.info('Epoch: ' + str(epoch) + '/' + str(nEpochs))
+            # Validation Set
+                accuracy_array_source = np.array([0.0] * len(self.joint_accur))
+                accuracy_array_target = np.array([0.0] * len(self.joint_accur))
+                accuracy_array_target2 = np.array([0.0] * len(self.joint_accur))
+                for i in range(validIter):
+                    img_valid_source, gt_valid_source, weight_valid_source = next(self.validgen_source)
+                    img_valid_target, gt_valid_target, weight_valid_target = next(self.validgen_target)
+                    img_valid_target2, gt_valid_target2, weight_valid_target2 = next(self.generator_target)
+                    accuracy_pred_source = self.Session.run(self.joint_accur,
+                                                            feed_dict={self.img_source: img_valid_source,
+                                                                       self.gtMaps_source: gt_valid_source,
+                                                                       self.is_training: False})
+
+                    accuracy_pred_target = self.Session.run(self.joint_accur,
+                                                            feed_dict={self.img_source: img_valid_target,
+                                                                       self.gtMaps_source: gt_valid_target,
+                                                                       self.is_training: False})
+
+                    accuracy_pred_target2 = self.Session.run(self.joint_accur,
+                                                             feed_dict={self.img_source: img_valid_target2,
+                                                                        self.gtMaps_source: gt_valid_target2,
+                                                                        self.is_training: False})
+
+                    valid_summary = self.Session.run(self.test_op, feed_dict={self.img_source: img_valid_target2,
+                                                                              self.gtMaps_source: gt_valid_target2,
+                                                                              self.is_training: False})
+                    self.test_summary.add_summary(valid_summary, epoch * epochSize)
+                    self.test_summary.flush()
+
+                    accuracy_array_source += np.array(accuracy_pred_source, dtype=np.float32)
+                    accuracy_array_target += np.array(accuracy_pred_target, dtype=np.float32)
+                    accuracy_array_target2 += np.array(accuracy_pred_target2, dtype=np.float32)
+
+                accuracy_array_source = accuracy_array_source / validIter
+                accuracy_array_target = accuracy_array_target / validIter
+                accuracy_array_target2 = accuracy_array_target2 / validIter
+                accuracy_array_source_scalar = np.sum(accuracy_array_source) / len(accuracy_array_source)  # Convert to single scalar
+                accuracy_array_target_scalar = np.sum(accuracy_array_target) / len(accuracy_array_target)
+                accuracy_array_target2_scalar = np.sum(accuracy_array_target2) / len(accuracy_array_target2)
+
+                self.logger.info('Avg. Accuracy (36M, test) = %.3f%%', accuracy_array_source_scalar * 100)
+                self.logger.info('Avg. Accuracy (MP2, train) = %.3f%%', accuracy_array_target_scalar * 100)
+                self.logger.info('Avg. Accuracy (MP2, test) = %.3f%%', accuracy_array_target2_scalar * 100)
+                # Write to writer
+                test_summary_to_write = tf.Summary(value=[
+                    tf.Summary.Value(tag="acc_source", simple_value=accuracy_array_source_scalar),
+                    tf.Summary.Value(tag="acc_target", simple_value=accuracy_array_target_scalar),
+                    tf.Summary.Value(tag="acc_target2", simple_value=accuracy_array_target2_scalar),
+                ])
+                self.test_summary.add_summary(test_summary_to_write, epoch * epochSize)
+
+                self.resume['accur_source'].append(accuracy_array_source)
+                self.resume['accur_target'].append(accuracy_array_target)
+                self.resume['accur_target2'].append(accuracy_array_target2)
+
                 # Training Set
                 for i in range(epochSize):
                     # DISPLAY PROGRESS BAR
                     # TODO : Customize Progress Bar
-                    percent = ((i + 1) / epochSize) * 100
-                    num = np.int(20 * percent / 100)
-                    # tToEpoch = int((time.time() - epochstartTime) * (100 - percent)/(percent))
-                    # sys.stdout.write('\r Train: {0}>'.format("="*num) + "{0}>".format(" "*(20-num)) + '||' + str(percent)[:4] + '%' + ' -cost: ' + str(cost)[:6] + ' -avg_loss: ' + str(avg_cost)[:5] + ' -timeToEnd: ' + str(tToEpoch) + ' sec.')
                     sys.stdout.flush()
-                    img_train, gt_train, weight_train = next(self.generator)
+                    img_train, gt_train, weight_train = next(self.generator_source)
+                    img_train_target, gt_train_target, weight_target = next(self.generator_target)
 
-                    if i % saveStep == 0:
-                        print('iteration:{}'.format(i))
-                        if self.w_loss:
-                            _, c, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
-                                                             feed_dict={self.img: img_train, self.gtMaps: gt_train,
-                                                                        self.weights: weight_train,
-                                                                        self.is_training: True})
-                        else:
-                            _, c, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
-                                                             feed_dict={self.img: img_train, self.gtMaps: gt_train,
-                                                                        self.is_training: True})
-                        # Save summary (Loss + Accuracy)
-                        self.train_summary.add_summary(summary, epoch * epochSize + i)
+                    losses, summaries = self._run_training(img_train, gt_train, img_train_target, gt_train_target,
+                                                           weight_train)
+
+                    # Save summary (Loss + Accuracy)
+                    if i % 20 == 0:
+                        for summary in summaries:
+                            self.train_summary.add_summary(summary, epoch * epochSize + i)
                         self.train_summary.flush()
-                    else:
-                        if self.w_loss:
-                            _, c, = self.Session.run([self.train_rmsprop, self.loss],
-                                                     feed_dict={self.img: img_train, self.gtMaps: gt_train,
-                                                                self.weights: weight_train,
-                                                                self.is_training: True})
-                        else:
-                            _, c, = self.Session.run([self.train_rmsprop, self.loss],
-                                                     feed_dict={self.img: img_train, self.gtMaps: gt_train,
-                                                                self.is_training: True})
-                    cost += c
-                    avg_cost += c / epochSize
-                epochfinishTime = time.time()
-                # Save Weight (axis = epoch)
-                # if self.w_loss:
-                # 	weight_summary = self.Session.run(self.weight_op, {self.img : img_train, self.gtMaps: gt_train, self.weights: weight_train})
-                # else :
-                # 	weight_summary = self.Session.run(self.weight_op, {self.img : img_train, self.gtMaps: gt_train})
-                # self.train_summary.add_summary(weight_summary, epoch)
-                # self.train_summary.flush()
-                print('Epoch ' + str(epoch) + '/' + str(nEpochs) + ' done in ' + str(
-                    int(epochfinishTime - epochstartTime)) + ' sec.' + ' -avg_time/batch: ' + str(
-                    ((epochfinishTime - epochstartTime) / epochSize))[:4] + ' sec.')
+
                 with tf.variable_scope('save'):
                     self.saver.save(self.Session, os.path.join(os.getcwd(), str(self.name + '_' + str(epoch + 1))))
-                self.resume['loss'].append(cost)
-                # Validation Set
-                accuracy_array = np.array([0.0] * len(self.joint_accur))
-                for i in range(validIter):
-                    img_valid, gt_valid, w_valid = next(self.valid_gen)
-                    accuracy_pred = self.Session.run(self.joint_accur,
-                                                     feed_dict={self.img: img_valid, self.gtMaps: gt_valid,
-                                                                self.is_training: False})
-                    accuracy_array += np.array(accuracy_pred, dtype=np.float32) / validIter
-                print('--Avg. Accuracy =', str((np.sum(accuracy_array) / len(accuracy_array)) * 100)[:6], '%')
-                self.resume['accur'].append(accuracy_pred)
-                self.resume['err'].append(np.sum(accuracy_array) / len(accuracy_array))
-                valid_summary = self.Session.run(self.test_op, feed_dict={self.img: img_valid, self.gtMaps: gt_valid,
-                                                                          self.is_training: False})
-                self.test_summary.add_summary(valid_summary, epoch * epochSize)
-                self.test_summary.flush()
-            print('Training Done')
-            print('Resume:' + '\n' + '  Epochs: ' + str(nEpochs) + '\n' + '  n. Images: ' + str(
-                nEpochs * epochSize * self.batchSize))
-            print('  Final Loss: ' + str(cost) + '\n' + '  Relative Loss: ' + str(
-                100 * self.resume['loss'][-1] / (self.resume['loss'][0] + 0.1)) + '%')
-            print('  Relative Improvement: ' + str((self.resume['err'][-1] - self.resume['err'][0]) * 100) + '%')
-            print('  Training Time: ' + str(datetime.timedelta(seconds=time.time() - startTime)))
 
-    def record_training(self, record):
-        """ Record Training Data and Export them in CSV file
-        Args:
-            record		: record dictionnary
-        """
-        out_file = open(self.name + '_train_record.csv', 'w')
-        for line in range(len(record['accur'])):
-            out_string = ''
-            labels = [record['loss'][line]] + [record['err'][line]] + record['accur'][line]
-            for label in labels:
-                out_string += str(label) + ', '
-            out_string += '\n'
-            out_file.write(out_string)
-        out_file.close()
-        print('Training Record Saved')
+            print('Training Done')
+
+    def _run_training(self, img_train, gt_train, img_train_target, gt_train_target, weight_train):
+
+        if self.w_loss:
+            _, loss, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
+                                             feed_dict={self.img_source: img_train, self.gtMaps_source: gt_train,
+                                                        self.weights: weight_train,
+                                                        self.is_training: True})
+        else:
+            _, loss, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
+                                             feed_dict={self.img_source: img_train, self.gtMaps_source: gt_train,
+                                                        self.is_training: True})
+
+        losses = [loss]
+        summaries = [summary]
+
+        return losses, summaries
 
     def training_init(self, nEpochs=10, epochSize=1000, saveStep=500, load=None):
         """ Initialize the training
@@ -350,12 +361,13 @@ class HourglassModel():
         WORK IN PROGRESS
         """
         self.bceloss = tf.reduce_mean(
-            tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps),
+            tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
             name='cross_entropy_loss')
         e1 = tf.expand_dims(self.weights, axis=1, name='expdim01')
         e2 = tf.expand_dims(e1, axis=1, name='expdim02')
         e3 = tf.expand_dims(e2, axis=1, name='expdim03')
         return tf.multiply(e3, self.bceloss, name='lossW')
+
 
     def _accuracy_computation(self):
         """ Computes accuracy tensor
@@ -363,7 +375,7 @@ class HourglassModel():
         self.joint_accur = []
         for i in range(len(self.joints)):
             self.joint_accur.append(
-                self._accur(self.output_source[:, self.nStack - 1, :, :, i], self.gtMaps[:, self.nStack - 1, :, :, i],
+                self._accur(self.output_source[:, self.nStack - 1, :, :, i], self.gtMaps_source[:, self.nStack - 1, :, :, i],
                             self.batchSize))
 
     def _define_saver_summary(self, summary=True):
@@ -673,19 +685,19 @@ class HourglassModel():
                 img_valid_target, gt_valid_target, weight_valid_target = next(self.validgen_target)
                 img_valid_target2, gt_valid_target2, weight_valid_target2 = next(self.generator_target)
                 accuracy_pred_source = self.Session.run(self.joint_accur,
-                                                        feed_dict={self.img: img_valid_source,
-                                                                   self.gtMaps: gt_valid_source,
-                                                                   self.is_training: False})
+                                                        feed_dict={self.img_source: img_valid_source,
+                                                                   self.gtMaps_source: gt_valid_source,
+                                                                   self.is_training:False})
 
                 accuracy_pred_target = self.Session.run(self.joint_accur,
-                                                        feed_dict={self.img: img_valid_target,
-                                                                   self.gtMaps: gt_valid_target,
+                                                        feed_dict={self.img_source: img_valid_target,
+                                                                   self.gtMaps_source: gt_valid_target,
                                                                    self.is_training: False})
 
                 accuracy_pred_target2 = self.Session.run(self.joint_accur,
-                                                         feed_dict={self.img: img_valid_target2,
-                                                                    self.gtMaps: gt_valid_target2,
-                                                                    self.is_training: False})
+                                                         feed_dict={self.img_source: img_valid_target2,
+                                                                    self.gtMaps_source: gt_valid_target2,
+                                                                    self.is_training:False})
 
                 accuracy_array_source += np.array(accuracy_pred_source, dtype=np.float32)
                 accuracy_array_target += np.array(accuracy_pred_target, dtype=np.float32)
@@ -695,8 +707,7 @@ class HourglassModel():
             accuracy_array_target2 = accuracy_array_target2 / validIter
             print('--Avg. Accuracy =', str((np.sum(accuracy_array_source) / len(accuracy_array_source)) * 100)[:6], '%')
             print('--Avg. Accuracy =', str((np.sum(accuracy_array_target) / len(accuracy_array_target)) * 100)[:6], '%')
-            print('--Avg. Accuracy =', str((np.sum(accuracy_array_target2) / len(accuracy_array_target2)) * 100)[:6],
-                  '%')
+            print('--Avg. Accuracy =', str((np.sum(accuracy_array_target2) / len(accuracy_array_target2)) * 100)[:6], '%')
 
 
 if __name__ == '__main__':

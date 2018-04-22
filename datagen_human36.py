@@ -161,6 +161,7 @@ class DataGenerator_human36():
                 joints = self._reduce_joints(joints)
             if np.all(joints == -1):
                 self.no_intel.append(names[index])
+                del self.data_dict[names[index]]
             else:
                 w = (joints[:, 0] != -1).astype(np.int)
                 self.data_dict[names[index]] = {'box': box, 'joints': joints, 'weights': w}
@@ -189,6 +190,7 @@ class DataGenerator_human36():
                 joints = self._reduce_joints(joints)
             if np.all(joints == -1):  # if joints == [-1] * len(joints):
                 self.no_intel.append(names[index])
+                del self.data_dict[names[index]]
             else:
                 w = (joints[:, 0] != -1).astype(np.int)
                 self.data_dict[names[index]] = {'box': box, 'joints': joints, 'weights': w}

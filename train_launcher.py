@@ -85,7 +85,7 @@ if __name__ == '__main__':
 							   name=params['name'], logdir=params['log_dir'],
                                w_loss=params['weighted_loss'],
 							   joints=params['joint_list'], gpu=args.gpu)
-	else:
+	elif args.network == 'hourglass_gan':
 		model = HourglassModel_gan(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
 							   nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
 							   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
@@ -94,6 +94,9 @@ if __name__ == '__main__':
 							   name=params['name'], logdir=params['log_dir'],
 							   w_loss=params['weighted_loss'],
 							   joints=params['joint_list'], gpu=args.gpu)
+	else:
+		raise NotImplementedError()
+
 	model.generate_model()
 	# modelPath='/home/lichen/pose_estimation/hourglasstensorlfow/hourglassModel_tiny_1stack/hg_refined_200_200'
 	model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=None)

@@ -227,9 +227,9 @@ class PredictProcessor():
 			t = time()
 		if img.shape == (256,256,3):
 			if sess is None:
-				out = self.HG.Session.run(self.HG.output, feed_dict={self.HG.img : np.expand_dims(img, axis = 0)})
+				out = self.HG.Session.run(self.HG.output, feed_dict={self.HG.img_source : np.expand_dims(img, axis = 0)})
 			else:
-				out = sess.run(self.HG.output, feed_dict={self.HG.img : np.expand_dims(img, axis = 0)})
+				out = sess.run(self.HG.output, feed_dict={self.HG.img_source : np.expand_dims(img, axis = 0)})
 		else:
 			print('Image Size does not match placeholder shape')
 			raise Exception
@@ -251,9 +251,9 @@ class PredictProcessor():
 			t = time()
 		if img.shape == (256,256,3):
 			if sess is None:
-				out = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img : np.expand_dims(img, axis = 0)})
+				out = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source : np.expand_dims(img, axis = 0)})
 			else:
-				out = sess.run(self.HG.pred_sigmoid, feed_dict={self.HG.img : np.expand_dims(img, axis = 0)})
+				out = sess.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source : np.expand_dims(img, axis = 0)})
 		else:
 			print('Image Size does not match placeholder shape')
 			raise Exception
@@ -273,15 +273,15 @@ class PredictProcessor():
 		if debug:
 			t = time()
 			if sess is None:
-				j1 = self.HG.Session.run(self.HG.joint_tensor, feed_dict = {self.HG.img: img})
+				j1 = self.HG.Session.run(self.HG.joint_tensor, feed_dict = {self.HG.img_source: img})
 			else:
-				j1 = sess.run(self.HG.joint_tensor, feed_dict = {self.HG.img: img})
+				j1 = sess.run(self.HG.joint_tensor, feed_dict = {self.HG.img_source: img})
 			print('JT:', time() - t)
 			t = time()
 			if sess is None:
-				j2 = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: img})
+				j2 = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: img})
 			else:
-				j2 = sess.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: img})
+				j2 = sess.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: img})
 			print('JTF:', time() - t)
 			if coord == 'hm':
 				return j1, j2
@@ -291,9 +291,9 @@ class PredictProcessor():
 				print("Error: 'coord' argument different of ['hm','img']")
 		else:
 			if sess is None:
-				j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: img})
+				j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: img})
 			else:
-				j = sess.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: img})
+				j = sess.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: img})
 			if coord == 'hm':
 				return j
 			elif coord == 'img':
@@ -309,9 +309,9 @@ class PredictProcessor():
 			Not more efficient than Numpy, prefer Numpy for such operation!
 		"""
 		if sess is None:
-			hm = self.HG.Session.run(self.HG.pred_sigmoid , feed_dict = {self.HG.img: img})
+			hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img_source: img})
 		else:
-			hm = sess.run(self.HG.pred_sigmoid , feed_dict = {self.HG.img: img})
+			hm = sess.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img_source: img})
 		joints = -1*np.ones(shape = (self.params['num_joints'], 2))
 		for i in range(self.params['num_joints']):
 			index = np.unravel_index(hm[0,:,:,i].argmax(), (self.params['hm_size'],self.params['hm_size']))
@@ -335,7 +335,7 @@ class PredictProcessor():
 		if debug:
 			t = time()
 		if batch[0].shape == (256,256,3):
-			out = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img : batch})
+			out = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source : batch})
 		else:
 			print('Image Size does not match placeholder shape')
 			raise Exception
@@ -405,7 +405,7 @@ class PredictProcessor():
 			img = np.copy(img)
 		if norm:
 			img_hg = img / 255
-		hg = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img: np.expand_dims(img_hg, axis = 0)})
+		hg = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img_source: np.expand_dims(img_hg, axis = 0)})
 		j = np.ones(shape = (self.params['num_joints'],2)) * -1
 		for i in range(len(j)):
 			idx = np.unravel_index( hg[0,:,:,i].argmax(), (64,64))
@@ -523,7 +523,7 @@ class PredictProcessor():
 			img_hg = cv2.resize(img, (256,256))
 			img_res = cv2.resize(img, (500,500))
 			img_hg = cv2.cvtColor(img_hg, cv2.COLOR_BGR2RGB)
-			j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: np.expand_dims(img_hg/255, axis = 0)})
+			j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: np.expand_dims(img_hg / 255, axis = 0)})
 			j = np.asarray(j * 500 / 64).astype(np.int)
 			joints = self.jointsToMat(j)
 			jHistory.append(joints)
@@ -582,7 +582,7 @@ class PredictProcessor():
 			img_res = cv2.resize(img, (400,400))
 			cv2.imwrite('F:/Cours/DHPE/photos/acp/%04d.png' % (frame,), img_res)
 			img_hg = cv2.cvtColor(img_hg, cv2.COLOR_BGR2RGB)
-			j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img: np.expand_dims(img_hg/255, axis = 0)})
+			j = self.HG.Session.run(self.HG.joint_tensor_final, feed_dict = {self.HG.img_source: np.expand_dims(img_hg / 255, axis = 0)})
 			j = np.asarray(j * 400 / 64).astype(np.int)
 			joints = self.jointsToMat(j)
 			X = j.reshape((32,1),order = 'F')
@@ -628,7 +628,7 @@ class PredictProcessor():
 			img_res = cv2.resize(img, (800,800))
 			#img_copy = np.copy(img_res)
 			img_hg = cv2.cvtColor(img_hg, cv2.COLOR_BGR2RGB)
-			hg = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img: np.expand_dims(img_hg/255, axis = 0)})
+			hg = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict = {self.HG.img_source: np.expand_dims(img_hg / 255, axis = 0)})
 			j = np.ones(shape = (self.params['num_joints'],2)) * -1
 			if plt_hm:
 				hm = np.sum(hg[0], axis = 2)
@@ -715,7 +715,7 @@ class PredictProcessor():
 				padd = np.array([[padding[1],padding[3]],[padding[0],padding[2]],[0,0]])
 				img_person = np.pad(img_person, padd, mode = 'constant')
 				img_person = cv2.resize(img_person, (256,256))
-				hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img: np.expand_dims(img_person/255, axis= 0)})
+				hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source: np.expand_dims(img_person / 255, axis= 0)})
 				j = -1*np.ones(shape = (self.params['num_joints'],2))
 				joint = -1*np.ones(shape = (self.params['num_joints'],2))
 				for i in range(self.params['num_joints']):
@@ -776,7 +776,7 @@ class PredictProcessor():
 		padd = np.array([[padding[1],padding[3]],[padding[0],padding[2]],[0,0]])
 		img_person = np.pad(img_person, padd, mode = 'constant')
 		img_person = cv2.resize(img_person, (256,256))
-		hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img: np.expand_dims(img_person/255, axis= 0)})
+		hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source: np.expand_dims(img_person / 255, axis= 0)})
 		j = -1*np.ones(shape = (self.params['num_joints'],2))
 		joint = -1*np.ones(shape = (self.params['num_joints'],2))
 		for i in range(self.params['num_joints']):
@@ -917,7 +917,7 @@ class PredictProcessor():
 				padd = np.array([[padding[1],padding[3]],[padding[0],padding[2]],[0,0]])
 				img_person = np.pad(img_person, padd, mode = 'constant')
 				img_person = cv2.resize(img_person, (256,256))
-				hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img: np.expand_dims(img_person/255, axis= 0)})
+				hm = self.HG.Session.run(self.HG.pred_sigmoid, feed_dict={self.HG.img_source: np.expand_dims(img_person / 255, axis= 0)})
 				j = -1*np.ones(shape = (self.params['num_joints'],2))
 				joint = -1*np.ones(shape = (self.params['num_joints'],2))
 				for i in range(self.params['num_joints']):
