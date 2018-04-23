@@ -45,6 +45,7 @@ class HourglassModel_gan(HourglassModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.k = 5  # Number of times to train discriminator before a single step of update
 
     def generate_model(self):
         """ Create the complete graph
@@ -74,47 +75,38 @@ class HourglassModel_gan(HourglassModel):
                 self.output_target, self.enc_repre_target = self._graph_hourglass(self.img_target)
 
             with tf.variable_scope(self.dis_name):
-                d_logits = self.discriminator(self.enc_repre_source[0],
+                d_logits_source = self.discriminator(self.enc_repre_source[0],
                                               self.output_source,
                                               trainable=True,
                                               is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
-                d_logits_ = self.discriminator(self.enc_repre_target[0],
+                d_logits_target = self.discriminator(self.enc_repre_target[0],
                                                self.output_target,
                                                trainable=True,
                                                is_training=self.is_training)
 
-            d_loss_real = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits, labels=tf.ones_like(d_logits)))
-            d_loss_fake = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_, labels=tf.zeros_like(d_logits_)))
-            self.g_loss = tf.reduce_mean(
-                tf.nn.sigmoid_cross_entropy_with_logits(logits=d_logits_, labels=tf.ones_like(d_logits_)))
 
-            self.loss_d = d_loss_real + d_loss_fake
+            # Discriminator loss
+            d_logits = tf.concat([d_logits_source, d_logits_target], axis=0)
+            d_groundtruth = tf.concat([tf.zeros_like(d_logits_source), tf.ones_like(d_logits_target)], axis=0)
+            self.d_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_logits))
 
-            # with tf.name_scope('linear'):
-            #     w=tf.get_variable("linear_weigth",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer(maxval=0))
-            #     b=tf.get_variable("linear_bias",[1],dtype=tf.float32,initializer=tf.random_uniform_initializer())
-            #     loss_joint_linear=tf.add(tf.multiply(w,self.loss_d),b)
-                # loss_joint= self._compute_err(self.output_target,self.gtMaps_source)
-                # self.loss_diff=tf.reduce_sum(loss_joint-loss_joint_linear)
+            # Confusion loss
+            c_desired = tf.fill(tf.shape(d_groundtruth), 0.5)  # Uniform distribution
+            self.c_loss =tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_logits))
 
-            all_reg = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
-
-
-            # self.d_reg = [var for var in all_reg if self.dis_name in var.name]
-            # self.enc_reg = [var for var in all_reg if self.model_name in var.name]
-
-            self.trainable_para=[var for var in all_reg if self.model_name in var.name ]+ [var for var in all_reg if 'linear' in var.name ]
+            self.d_logits = d_logits
+            self.d_groundtruth = d_groundtruth
+            self.c_desired = c_desired
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
-                    self.loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')+0.01*self.g_loss
+                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')+0.01*self.c_loss
                 else:
-                    self.loss = tf.reduce_mean(
+                    self.p_loss = tf.reduce_mean(
                         tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
-                        name='cross_entropy_loss')+0.1*self.g_loss
+                        name='cross_entropy_loss')
+                self.loss = self.p_loss + 0.1*self.c_loss
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
@@ -129,20 +121,29 @@ class HourglassModel_gan(HourglassModel):
                 self.rmsprop_enc = tf.train.RMSPropOptimizer(learning_rate=self.lr)
                 self.rmsprop_d = tf.train.RMSPropOptimizer(learning_rate=self.lr)
             with tf.variable_scope('minimizer'):
-                self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
-                with tf.control_dependencies(self.update_ops):
-                    self.train_rmsprop_enc = self.rmsprop_enc.minimize(self.loss, self.train_step)
-                    self.train_rmsprop_d = self.rmsprop_d.minimize(self.loss_d, self.train_step)
+                update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+                with tf.control_dependencies(update_ops):
+
+                    # Get discriminator parameters, and create discriminator train_ip
+                    var_list_d = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator')
+                    self.train_rmsprop_d = self.rmsprop_d.minimize(self.d_loss, var_list=var_list_d)  # step not updated
+
+                    # Get main network parameters, and create main train_op
+                    var_list_main = [v for v in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES) if v not in var_list_d]
+                    self.train_rmsprop_enc = self.rmsprop_enc.minimize(self.loss, self.train_step, var_list=var_list_main)
 
         self.init = tf.global_variables_initializer()
 
         with tf.device(self.cpu):
             with tf.variable_scope('training'):
                 tf.summary.scalar('loss', self.loss, collections=['train_enc'])
-                # tf.summary.scalar('loss_diff', self.loss_diff, collections=['train_enc'])
-                # tf.summary.scalar('enc_loss', self.g_loss, collections=['train_enc'])
-                tf.summary.scalar('d_loss', self.loss_d, collections=['train_d'])
+                tf.summary.scalar('Confusion loss', self.c_loss, collections=['train_enc'])
+                tf.summary.scalar('Pose loss', self.p_loss, collections=['train_enc'])
+
+                tf.summary.scalar('Discriminator', self.d_loss, collections=['train_d'])
+
                 tf.summary.scalar('learning_rate', self.lr, collections=['train_enc'])
+
             with tf.variable_scope('summary'):
                 for i in range(len(self.joints)):
                     tf.summary.scalar(self.joints[i], self.joint_accur[i], collections=['train_enc', 'test'])
@@ -152,6 +153,7 @@ class HourglassModel_gan(HourglassModel):
         self.weight_op = tf.summary.merge_all('weight')
 
     def _run_training(self, img_train, gt_train, img_train_target, gt_train_target, weight_train):
+
         if self.w_loss:
             _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
                                                         feed_dict={self.img_source: img_train,
@@ -160,13 +162,16 @@ class HourglassModel_gan(HourglassModel):
                                                                    self.gtMaps_target: gt_train_target,
                                                                    self.weights: weight_train,
                                                                    self.is_training: True})
-            _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
-                                                    feed_dict={self.img_source: img_train,
-                                                               self.gtMaps_source: gt_train,
-                                                               self.img_target: img_train_target,
-                                                               self.gtMaps_target: gt_train_target,
-                                                               self.weights: weight_train,
-                                                               self.is_training: True})
+
+            for i in range(self.k):
+                _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.d_loss, self.train_op_d],
+                                                        feed_dict={self.img_source: img_train,
+                                                                   self.gtMaps_source: gt_train,
+                                                                   self.img_target: img_train_target,
+                                                                   self.gtMaps_target: gt_train_target,
+                                                                   self.weights: weight_train,
+                                                                   self.is_training: True})
+
         else:
             _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
                                                         feed_dict={self.img_source: img_train,
@@ -174,12 +179,15 @@ class HourglassModel_gan(HourglassModel):
                                                                    self.img_target: img_train_target,
                                                                    self.gtMaps_target: gt_train_target,
                                                                    self.is_training: True})
-            _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.loss_d, self.train_op_d],
-                                                    feed_dict={self.img_source: img_train,
-                                                               self.gtMaps_source: gt_train,
-                                                               self.img_target: img_train_target,
-                                                               self.gtMaps_target: gt_train_target,
-                                                               self.is_training: True})
+
+            for i in range(self.k):
+                _, loss_d, summary_d, = \
+                    self.Session.run([self.train_rmsprop_d, self.d_loss, self.train_op_d],
+                                      feed_dict={self.img_source: img_train,
+                                                 self.gtMaps_source: gt_train,
+                                                 self.img_target: img_train_target,
+                                                 self.gtMaps_target: gt_train_target,
+                                                 self.is_training: True})
 
         losses = [loss_enc, loss_d]
         summaries = [summary_enc, summary_d]
@@ -215,7 +223,7 @@ class HourglassModel_gan(HourglassModel):
         h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
 
         h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
-        h3= tcl.fully_connected(h2, 256, activation_fn=None)
+        h3= tcl.fully_connected(h2, 1, activation_fn=None)  # 2 classes: Source or target
         return h3
 
 if __name__ == '__main__':

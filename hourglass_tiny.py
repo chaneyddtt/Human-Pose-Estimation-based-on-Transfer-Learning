@@ -91,6 +91,8 @@ class HourglassModel():
         self.logger = logging.getLogger(self.__class__.__name__)  # Logger
         self.logger.info('Running on GPU: %s' % self.gpu)
 
+        self.logger.info('Dropout rate: %i', drop_rate)
+
     # ACCESSOR
 
     def get_input(self):
@@ -315,7 +317,7 @@ class HourglassModel():
                             self.train_summary.add_summary(summary, epoch * epochSize + i)
                         self.train_summary.flush()
 
-                    if epoch * epochSize + i % 250 == 0:
+                    if epoch * epochSize + i % 250 == 0 and epoch * epochSize + i > 0:
                         with tf.variable_scope('save'):
                             self.saver.save(self.Session, os.path.join(self.logdir_with_time, 'ckpt', 'model.ckpt'), epoch * epochSize + i)
 
