@@ -75,10 +75,12 @@ class HourglassModel_gan(HourglassModel):
 
             with tf.variable_scope(self.dis_name):
                 d_logits = self.discriminator(self.enc_repre_source[0],
+                                              self.output_source,
                                               trainable=True,
                                               is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
                 d_logits_ = self.discriminator(self.enc_repre_target[0],
+                                               self.output_target,
                                                trainable=True,
                                                is_training=self.is_training)
 
@@ -184,7 +186,7 @@ class HourglassModel_gan(HourglassModel):
 
         return losses, summaries
 
-    def discriminator(self, input, trainable=True, is_training=True):
+    def discriminator(self, input, output, trainable=True, is_training=True):
 
         h1=tf.nn.relu(tcl.batch_norm(tcl.conv2d(input,
                                                 num_outputs=1024,
@@ -197,7 +199,22 @@ class HourglassModel_gan(HourglassModel):
                                                 is_training=is_training))
         h1 = tf.layers.dropout(h1, rate=self.dropout_rate, training=is_training, name='dropout_dis')
         h1_flatten=tcl.flatten(h1)
-        h2=tf.contrib.layers.fully_connected(h1_flatten,512,scope="fc1")
+
+        output = tf.squeeze(output, axis=1)
+        h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
+                                                num_outputs=1024,
+                                                kernel_size=[output.shape[1], output.shape[2]],
+                                                stride=1,
+                                                padding='valid',
+                                                scope='conv1_b'),
+                                                trainable=trainable,
+                                                scope="bn1_b",
+                                                is_training=is_training))
+        h1_b_flatten = tcl.flatten(h1_b)
+
+        h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+
+        h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
         h3= tcl.fully_connected(h2, 256, activation_fn=None)
         return h3
 

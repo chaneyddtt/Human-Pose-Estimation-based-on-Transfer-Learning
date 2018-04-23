@@ -34,6 +34,8 @@ import sys
 import datetime
 import os
 
+from tqdm import tqdm
+
 
 class HourglassModel():
     """ HourglassModel class: (to be renamed)
@@ -79,6 +81,7 @@ class HourglassModel():
         self.cpu = '/cpu:0'
         self.gpu = '/gpu:%i' % gpu
         self.logdir = logdir
+        self.logdir_with_time = None
         self.joints = joints
         self.w_loss = w_loss
         self.dis_name='discriminator'
@@ -108,7 +111,7 @@ class HourglassModel():
         Warning:
             Be sure to build the model first
         """
-        return self.output
+        return self.output_source
 
     def get_label(self):
         """ Returns Label (Placeholder) Tensor
@@ -238,7 +241,6 @@ class HourglassModel():
             self.resume['accur_target2'] = []
             # self.resume['err'] = []
 
-
             for epoch in range(nEpochs):
 
                 print()
@@ -299,9 +301,7 @@ class HourglassModel():
                 self.resume['accur_target2'].append(accuracy_array_target2)
 
                 # Training Set
-                for i in range(epochSize):
-                    # DISPLAY PROGRESS BAR
-                    # TODO : Customize Progress Bar
+                for i in tqdm(range(epochSize)):
                     sys.stdout.flush()
                     img_train, gt_train, weight_train = next(self.generator_source)
                     img_train_target, gt_train_target, weight_target = next(self.generator_target)
@@ -315,8 +315,9 @@ class HourglassModel():
                             self.train_summary.add_summary(summary, epoch * epochSize + i)
                         self.train_summary.flush()
 
-                with tf.variable_scope('save'):
-                    self.saver.save(self.Session, os.path.join(os.getcwd(), str(self.name + '_' + str(epoch + 1))))
+                    if epoch * epochSize + i % 250 == 0:
+                        with tf.variable_scope('save'):
+                            self.saver.save(self.Session, os.path.join(self.logdir_with_time, 'ckpt', 'model.ckpt'), epoch * epochSize + i)
 
             print('Training Done')
 
@@ -388,17 +389,17 @@ class HourglassModel():
             raise ValueError('Train/Test directory not assigned')
         else:
             with tf.device(self.cpu):
-                self.saver = tf.train.Saver()
+                self.saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=0.5)
             if summary:
 
                 dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                logdir = os.path.join(self.logdir, dn_prefix)
-                self.logger.info('Summaries will be saved to %s' % logdir)
+                self.logdir_with_time = os.path.join(self.logdir, dn_prefix)
+                self.logger.info('Summaries will be saved to %s' % self.logdir_with_time)
 
                 with tf.device(self.gpu):
                     # self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'), tf.get_default_graph())
-                    self.train_summary = tf.summary.FileWriter(os.path.join(logdir, 'train'))  # Do not save graph for speed
-                    self.test_summary = tf.summary.FileWriter(os.path.join(logdir, 'test'))
+                    self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir_with_time, 'train'))  # Do not save graph for speed
+                    self.test_summary = tf.summary.FileWriter(os.path.join(self.logdir_with_time, 'test'))
                     # self.weight_summary = tf.summary.FileWriter(self.logdir_train, tf.get_default_graph())
 
 
