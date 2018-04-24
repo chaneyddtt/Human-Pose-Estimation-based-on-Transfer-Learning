@@ -509,24 +509,22 @@ class HourglassModel():
         """Create the Network
         Args:
             inputs : TF Tensor (placeholder) of shape (None, 256, 256, 3) #TODO : Create a parameter for customize size
+
+
+        Zi Jian's modifications. Preprocessing convolution kernel size changed to 7
         """
         with tf.variable_scope('hourglass'):
-        # with tf.name_scope(name=self.model_name,reuse=reuse):
-            # if (reuse):
-                # vs.reuse_variables()
             with tf.variable_scope('preprocessing'):
-                # Input Dim : nbImages x 256 x 256 x 3
-                pad1 = tf.pad(inputs, [[0, 0], [2, 2], [2, 2], [0, 0]], name='pad_1')
-                # Dim pad1 : nbImages x 260 x 260 x 3
-                conv1 = self._conv_bn_relu(pad1, filters=64, kernel_size=6, strides=2, name='conv_256_to_128')
+                # Dim pad1 : nbImages x 256 x 256 x 3
+                conv1 = self._conv_bn_relu(inputs, filters=64, kernel_size=7, strides=2, name='conv_256_to_128', pad='SAME')
                 # Dim conv1 : nbImages x 128 x 128 x 64
                 r1 = self._residual(conv1, numOut=128, name='r1')
                 # Dim pad1 : nbImages x 128 x 128 x 128
                 pool1 = tf.contrib.layers.max_pool2d(r1, [2, 2], [2, 2], padding='VALID')
                 # Dim pool1 : nbImages x 64 x 64 x 128
-
                 r2 = self._residual(pool1, numOut=int(self.nFeat / 2), name='r2')
-                r3 = self._residual(r2, numOut=self.nFeat, name='r3')
+                r3 = self._residual(r2, numOut=self.nFeat, name='r3')  # Input to hourglass units
+
             # Storage Table
             enc_repre = [None] * self.nStack
             hg = [None] * self.nStack
@@ -613,7 +611,7 @@ class HourglassModel():
         with tf.variable_scope(name):
             kernel = tf.get_variable('weights', [kernel_size, kernel_size, inputs.get_shape().as_list()[3], filters],
                                      initializer=tf.contrib.layers.xavier_initializer(uniform=False))
-            conv = tf.nn.conv2d(inputs, kernel, [1, strides, strides, 1], padding='VALID', data_format='NHWC')
+            conv = tf.nn.conv2d(inputs, kernel, [1, strides, strides, 1], padding=pad, data_format='NHWC')
             norm = tf.contrib.layers.batch_norm(conv, 0.9, epsilon=1e-5, activation_fn=tf.nn.relu,
                                                 is_training=self.is_training)
             return norm
