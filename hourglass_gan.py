@@ -208,19 +208,21 @@ class HourglassModel_gan(HourglassModel):
         h1 = tf.layers.dropout(h1, rate=self.dropout_rate, training=is_training, name='dropout_dis')
         h1_flatten=tcl.flatten(h1)
 
-        output = tf.squeeze(output, axis=1)
-        h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
-                                                num_outputs=1024,
-                                                kernel_size=[output.shape[1], output.shape[2]],
-                                                stride=1,
-                                                padding='valid',
-                                                scope='conv1_b'),
-                                                trainable=trainable,
-                                                scope="bn1_b",
-                                                is_training=is_training))
-        h1_b_flatten = tcl.flatten(h1_b)
+        # output = tf.squeeze(output, axis=1)
+        # h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
+        #                                         num_outputs=1024,
+        #                                         kernel_size=[output.shape[1], output.shape[2]],
+        #                                         stride=1,
+        #                                         padding='valid',
+        #                                         scope='conv1_b'),
+        #                                         trainable=trainable,
+        #                                         scope="bn1_b",
+        #                                         is_training=is_training))
+        # h1_b_flatten = tcl.flatten(h1_b)
+        #
+        # h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
 
-        h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+        h1_cat = h1_flatten
 
         h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
         h3= tcl.fully_connected(h2, 1, activation_fn=None)  # 2 classes: Source or target
