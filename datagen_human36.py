@@ -248,10 +248,11 @@ class DataGenerator_human36():
 
         self.train_set = [t for t in self.train_table if self._complete_sample(t)]
         self.valid_set = [v for v in self.valid_table if self._complete_sample(v)]
-        self.data_sizes = {'train': len(self.train_set), 'valid': len(self.valid_set), 'test':0}
 
         # Subsample to 1% of original validation set for speed
         self.valid_set = self.valid_set[0::100]
+
+        self.data_sizes = {'train': len(self.train_set), 'valid': len(self.valid_set), 'test': 0}
 
         self.logger.info('Set created')
 
@@ -323,10 +324,20 @@ class DataGenerator_human36():
         """
         if random.choice([0, 1]):  # 50% chance of augmenting
 
-            # Rotate
+            # Lighting
+            mu = np.mean(img)
+            img = random.normalvariate(1.0, 0.1) * (img - mu) + mu # contrast
+            img += random.uniform(-32/255, 32/255)  # Brightness
+            img = np.clip(img, 0.0, 1.0)  # Clip back to 0-1
+
+            # Rotate + scale
             r_angle = np.random.randint(-1 * max_rotation, max_rotation)
-            img = utils.rotate_about_center(img, r_angle)
-            hm = utils.rotate_about_center(hm, r_angle)
+            scale = np.clip(random.normalvariate(1.0, 0.2), 0.5, 2.0)
+            img = utils.rotate_about_center(img, r_angle, scale)
+            hm = utils.rotate_about_center(hm, r_angle, scale)
+
+            # Clip again
+            img = np.clip(img, 0.0, 1.0)  # Clip back to 0-1
 
         return img, hm
 
@@ -375,7 +386,7 @@ class DataGenerator_human36():
                 print('Batch : ', time.time() - t, ' sec.')
             yield train_img, train_gtmap
 
-    def _aux_generator(self, batch_size=16, stacks=4, normalize=True, sample_set='train', randomize=True):
+    def _aux_generator(self, batch_size=16, stacks=4, normalize=False, sample_set='train', randomize=True):
         """ Auxiliary Generator
         Args:
             See Args section in self._generator
@@ -405,8 +416,7 @@ class DataGenerator_human36():
                 img = self.open_img(name)
                 joints = self._relative_joints(224, joints, to_size=64)
                 hm = self._generate_hm(64, 64, joints, 64, weight)
-                img = img.astype(np.uint8)
-                img = scm.imresize(img, (256, 256))
+                img = cv2.resize(img, (256, 256))
                 if sample_set == 'train':
                     img, hm = self._augment(img, hm)
                 hm = np.expand_dims(hm, axis=0)
@@ -439,13 +449,17 @@ class DataGenerator_human36():
         img = cv2.imread(os.path.join(self.img_dir, name))
         if color == 'RGB':
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            return img
         elif color == 'BGR':
-            return img
+            pass
         elif color == 'GRAY':
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
-            print('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
+            self.logger.error('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
+            raise NotImplementedError()
+
+        # Convert to float in range [0, 1]
+        img = img.astype(np.float32) / 255.0
+        return img
 
     def plot_img(self, name, c=(0,0,255)):
         """ Plot an image
@@ -514,7 +528,7 @@ def get_max_positions(hm, scale):
 
 def draw_result(img, pred, gt=None):
 
-    dst = (img / np.max(np.abs(img)) * 255).astype(np.uint8)
+    dst = (img * 255).astype(np.uint8)
     nPts = pred.shape[2]
 
     joints = get_max_positions(pred, scale = img.shape[0] / pred.shape[0])
@@ -569,9 +583,9 @@ if __name__ == '__main__':
 
     plt.figure()
     while True:
-        imgs,b,c = next(generator_source)
+        imgs, b, c, _ = next(generator_source)
         plt.figure()
-        plt.imshow(imgs[0,:,:,:])
+        plt.imshow(imgs[0,:,:,:]*255)
         print('img range: ', np.min(imgs[0,:,:,:]), '-', np.max(imgs[0,:,:,:]))
         plt.show()
 

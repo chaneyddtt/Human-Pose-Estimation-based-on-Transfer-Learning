@@ -341,16 +341,27 @@ class DataGenerator:
         new_j = new_j * to_size / (max_l + 0.0000001)
         return new_j.astype(np.int32)
 
-    def _augment(self,img, hm, mask=None, max_rotation = 30):
+    def _augment(self, img, hm, mask=None, max_rotation=30):
         """ # TODO : IMPLEMENT DATA AUGMENTATION
         """
-        if random.choice([0,1]):  # 50 percent chance of augmenting
+        if random.choice([0, 1]):  # 50% chance of augmenting
 
+            # Lighting
+            mu = np.mean(img)
+            img = random.normalvariate(1.0, 0.1) * (img - mu) + mu # contrast
+            img += random.uniform(-32/255, 32/255)  # Brightness
+            img = np.clip(img, 0.0, 1.0)  # Clip back to 0-1
+
+            # Rotate + scale
             r_angle = np.random.randint(-1 * max_rotation, max_rotation)
-            img = utils.rotate_about_center(img, r_angle)
-            hm = utils.rotate_about_center(hm, r_angle)
+            scale = np.clip(random.normalvariate(1.0, 0.2), 0.5, 2.0)
+            img = utils.rotate_about_center(img, r_angle, scale)
+            hm = utils.rotate_about_center(hm, r_angle, scale)
             if mask is not None:
-                mask = utils.rotate_about_center(mask, r_angle, cv2.INTER_NEAREST)
+                mask = utils.rotate_about_center(mask, r_angle, scale, cv2.INTER_NEAREST)
+
+            # Clip again
+            img = np.clip(img, 0.0, 1.0)  # Clip back to 0-1
 
         if mask is None:
             return img, hm
@@ -367,7 +378,7 @@ class DataGenerator:
                       (box_2d_cropped[0,0], box_2d_cropped[0,1]), (box_2d_cropped[1,0], box_2d_cropped[1,1]),
                       (255,255,255), -1 )
 
-    def _aux_generator(self, batch_size = 16, stacks = 4, normalize = True, sample_set = 'train', randomize=True):
+    def _aux_generator(self, batch_size = 16, stacks = 4, normalize=False, sample_set = 'train', randomize=True):
         """ Auxiliary Generator
         Args:
             See Args section in self._generator
@@ -407,8 +418,7 @@ class DataGenerator:
                 new_j = self._relative_joints(cbox,padd, joints, to_size=64)
                 hm = self._generate_hm(64, 64, new_j, 64, weight)
                 img = self._crop_img(img, padd, cbox)
-                img = img.astype(np.uint8)
-                img = scm.imresize(img, (256,256))
+                img = cv2.resize(img, (256,256))
                 mask = self._generate_mask(box, padd, cbox)
                 if sample_set == 'train':
                     img, hm, mask = self._augment(img, hm, mask)
@@ -445,14 +455,17 @@ class DataGenerator:
         img = cv2.imread(os.path.join(self.img_dir, name))
         if color == 'RGB':
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            return img
         elif color == 'BGR':
-            return img
+            pass
         elif color == 'GRAY':
-            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
             self.logger.error('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
             raise NotImplementedError()
+
+        # Convert to float in range [0, 1]
+        img = img.astype(np.float32) / 255.0
+        return img
 
     def plot_img(self, name, plot = 'plt'):
         """ Plot an image
