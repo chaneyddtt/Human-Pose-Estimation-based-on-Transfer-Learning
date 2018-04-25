@@ -51,6 +51,7 @@ parse = argparse.ArgumentParser()
 parse.add_argument("--network", help="choose a network", default='hourglass_gan', type=str)
 parse.add_argument("--gpu", help="Select GPU (default: 0)", default=0, type=int)
 parse.add_argument("--name", help="Name of run (used to name tf.Summary)", default='', type=str)
+parse.add_argument("--no_save_graph", help="If set, graph will not be save in tf summaries (speeds up init)", action='store_true')
 args = parse.parse_args()
 
 # Parse config
@@ -104,22 +105,24 @@ if __name__ == '__main__':
 
     if args.network=='hourglass_tiny':
         model = HourglassModel(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
-                               nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
+                               nLow=params['nlow'], outputDim=params['num_joints'],
+                               batch_size=params['batch_size'], val_batch_size=params['val_batch_size'],
                                drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
                                decay=params['learning_rate_decay'], decay_step=params['decay_step'],
                                dataset_source=dataset_source,dataset_target=dataset_target,
                                name=params['name'], logdir=logdir,
                                w_loss=params['weighted_loss'],
-                               joints=params['joint_list'], gpu=args.gpu)
+                               joints=params['joint_list'], save_graph=(not args.no_save_graph), gpu=args.gpu)
     elif args.network == 'hourglass_gan':
         model = HourglassModel_gan(nFeat=params['nfeats'], nStack=params['nstacks'], nModules=params['nmodules'],
-                               nLow=params['nlow'], outputDim=params['num_joints'], batch_size=params['batch_size'],
-                               drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
-                               decay=params['learning_rate_decay'], decay_step=params['decay_step'],
-                               dataset_source=dataset_source, dataset_target=dataset_target,
-                               name=params['name'], logdir=logdir,
-                               w_loss=params['weighted_loss'],
-                               joints=params['joint_list'], gpu=args.gpu)
+                                   nLow=params['nlow'], outputDim=params['num_joints'],
+                                   batch_size=params['batch_size'], val_batch_size=params['val_batch_size'],
+                                   drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
+                                   decay=params['learning_rate_decay'], decay_step=params['decay_step'],
+                                   dataset_source=dataset_source, dataset_target=dataset_target,
+                                   name=params['name'], logdir=logdir,
+                                   w_loss=params['weighted_loss'],
+                                   joints=params['joint_list'], save_graph=(not args.no_save_graph), gpu=args.gpu)
     else:
         raise NotImplementedError()
 

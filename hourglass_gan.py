@@ -82,7 +82,6 @@ class HourglassModel_gan(HourglassModel):
                                                trainable=True,
                                                is_training=self.is_training)
 
-
             # Discriminator loss
             d_logits = tf.concat([d_logits_source, d_logits_target], axis=0)
             d_groundtruth = tf.concat([tf.zeros_like(d_logits_source), tf.ones_like(d_logits_target)], axis=0)

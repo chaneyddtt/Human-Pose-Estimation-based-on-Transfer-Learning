@@ -45,11 +45,11 @@ class HourglassModel():
     Please check README.txt for further information on model management.
     """
 
-    def __init__(self, nFeat=512, nStack=4, nModules=1, nLow=3, outputDim=16, batch_size=16, drop_rate=0.2,
+    def __init__(self, nFeat=512, nStack=4, nModules=1, nLow=3, outputDim=16,
+                 batch_size=4, val_batch_size=16, drop_rate=0.2,
                  lear_rate=2.5e-4, decay=0.96, decay_step=2000, dataset_source=None, dataset_target=None,
                  logdir=None, w_loss=False, modif=False, name='hourglass',
-                 joints=['r_anckle', 'r_knee', 'r_hip', 'l_hip', 'l_knee', 'l_anckle', 'pelvis', 'thorax', 'neck',
-                         'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist'], gpu=0):
+                 joints=None, save_graph=True, gpu=0):
         """ Initializer
         Args:
             nStack				: number of stacks (stage/Hourglass modules)
@@ -66,11 +66,18 @@ class HourglassModel():
             modif				: (bool) Boolean to test some network modification # DO NOT USE IT ! USED TO TEST THE NETWORK
             name				: name of the model
         """
+
+        # Default arguments
+        if joints is None:
+            joints = ['r_anckle', 'r_knee', 'r_hip', 'l_hip', 'l_knee', 'l_anckle', 'pelvis', 'thorax', 'neck',
+                      'head', 'r_wrist', 'r_elbow', 'r_shoulder', 'l_shoulder', 'l_elbow', 'l_wrist']
+
         self.nStack = nStack  # Excludes hourglass_0, i.e. even if nStack is 1, there will be 2 hourglasses
         self.nFeat = nFeat
         self.nModules = nModules
         self.outDim = outputDim
         self.batchSize = batch_size
+        self.valBatchSize = val_batch_size
         self.dropout_rate = drop_rate
         self.learning_rate = lear_rate
         self.decay = decay
@@ -88,6 +95,7 @@ class HourglassModel():
         self.dis_name='discriminator'
         self.model_name='hourglass_first'
         self.is_training = tf.placeholder(tf.bool)
+        self.save_graph = save_graph
 
         self.init = None  # Initialization function
 
@@ -96,23 +104,10 @@ class HourglassModel():
 
         self.logger.info('Dropout rate: %.2f', drop_rate)
 
+
         # For saving image summary tensors
-        self.result_source_val_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.result_target_train_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.result_target_val_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.pred_source_val_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.pred_target_train_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.pred_target_val_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
-        self.image_summary_op = [tf.summary.image('source', self.result_source_val_pl, max_outputs=10),
-                                 tf.summary.image('target_train', self.result_target_train_pl, max_outputs=10),
-                                 tf.summary.image('target_val_result', self.result_target_val_pl, max_outputs=10),
-                                 tf.summary.image('source_pred', self.pred_source_val_pl, max_outputs=10),
-                                 tf.summary.image('target_train_pred', self.pred_target_train_pl, max_outputs=10),
-                                 tf.summary.image('target_val_result_pred', self.pred_target_val_pl, max_outputs=10),
-                                 ]
-
-
-    # ACCESSOR
+        self.overlay_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
+        self.heatmap_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
 
     def get_input(self):
         """ Returns Input (Placeholder) Tensor
@@ -239,47 +234,26 @@ class HourglassModel():
                 else:
                     print('Please give a Model in args (see README for further information)')
 
-    def _generate_im_summaries(self, img_valid_source, img_train_target, img_valid_target,
-                               gt_valid_source, gt_train_target, gt_valid_target,
-                               pred_valid_source, pred_train_target, pred_valid_target,
-                               ):
-        source_result = []
-        target_train_result = []
-        target_val_result = []
-        source_pred = []
-        target_train_pred = []
-        target_val_pred = []
+    def _generate_im_summaries2(self, dataset_str, max_outputs=12):
 
-        width_height = img_valid_source.shape[1:3]
+        summary_overlay = tf.summary.image(dataset_str + "overlay", self.overlay_pl, max_outputs=max_outputs)
+        summary_heatmap = tf.summary.image(dataset_str + "_heatmap", self.heatmap_pl, max_outputs=max_outputs)
+        return summary_overlay, summary_heatmap
 
-        for j in range(img_valid_source.shape[0]):
-            source_result.append(draw_result(img_valid_source[j, :, :, :], pred_valid_source[j, 0, :, :, :],
-                                             gt_valid_source[j, 0, :, :, :]))
-            target_train_result.append(draw_result(img_train_target[j, :, :, :], pred_train_target[j, 0, :, :, :],
-                                                   gt_train_target[j, 0, :, :, :]))
-            target_val_result.append(draw_result(img_valid_target[j, :, :, :], pred_valid_target[j, 0, :, :, :],
-                                                 gt_valid_target[j, 0, :, :, :]))
-            source_pred.append(color_heatmap(pred_valid_source[j, 0, :, :, :], width_height, apply_sigmoid=True))
-            target_train_pred.append(color_heatmap(pred_train_target[j, 0, :, :, :], width_height, apply_sigmoid=True))
-            target_val_pred.append(color_heatmap(pred_valid_target[j, 0, :, :, :], width_height, apply_sigmoid=True))
+    def _generate_im_summaries(self, summary_ops, img, gt, pred):
 
-        source_result = np.stack(source_result, axis=0)
-        target_train_result = np.stack(target_train_result, axis=0)
-        target_val_result = np.stack(target_val_result, axis=0)
-        source_pred = np.stack(source_pred, axis=0)
-        target_train_pred = np.stack(target_train_pred, axis=0)
-        target_val_pred = np.stack(target_val_pred, axis=0)
-        im_summaries = self.Session.run(self.image_summary_op,
-                                        feed_dict={self.result_source_val_pl: source_result,
-                                                   self.result_target_train_pl: target_train_result,
-                                                   self.result_target_val_pl: target_val_result,
-                                                   self.pred_source_val_pl: source_pred,
-                                                   self.pred_target_train_pl: target_train_pred,
-                                                   self.pred_target_val_pl: target_val_pred,
-                                                   })
+        width_height = img.shape[1:3]
+        overlays, heatmaps = [], []
 
+        for j in range(img.shape[0]):
+            overlays.append(draw_result(img[j, :, :, :], pred[j, 0, :, :, :], gt[j, 0, :, :, :]))
+            heatmaps.append(color_heatmap(pred[j, 0, :, :, :], width_height, apply_sigmoid=True))
+
+        overlays = np.stack(overlays, axis=0)
+        heatmaps = np.stack(heatmaps, axis=0)
+
+        im_summaries = self.Session.run(summary_ops, feed_dict={self.overlay_pl: overlays, self.heatmap_pl: heatmaps})
         return im_summaries
-
 
     def _train(self, nEpochs=10, epochSize=1000, saveStep=500, validIter=10):
         """
@@ -287,109 +261,116 @@ class HourglassModel():
         with tf.variable_scope('Train'):
 
             self.dataset_source.generateSet()
-            self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                       sample_set='train')
-            self.validgen_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                   sample_set='valid')
-
             self.dataset_target.generateSet()
-            self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                       sample_set='train')
-            self.validgen_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
-                                                                   sample_set='valid')
-            self.resume = {}
-            self.resume['accur_source'] = []
-            self.resume['accur_target'] = []
-            self.resume['accur_target2'] = []
-            # self.resume['err'] = []
+
+            self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack,
+                                                                       randomize=True, sample_set='train')
+            self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack,
+                                                                       randomize=True, sample_set='train')
+
+            validation_names = ['source_val', 'target_val', 'target_test']
+            val_image_summary_ops = []
+            for vname in validation_names:
+                val_image_summary_ops.append(self._generate_im_summaries2(vname))
 
             for epoch in range(nEpochs):
 
+                '''
+                Validation
+                '''
                 print()
                 self.logger.info('Epoch: ' + str(epoch) + '/' + str(nEpochs))
 
-                # Validation Set
-                accuracy_array_source = np.array([0.0] * len(self.joint_accur))
-                accuracy_array_target = np.array([0.0] * len(self.joint_accur))
-                accuracy_array_target2 = np.array([0.0] * len(self.joint_accur))
-                for i in range(validIter):
-                    img_valid_source, gt_valid_source, weight_valid_source = next(self.validgen_source)
-                    img_valid_target, gt_valid_target, weight_valid_target, mask_valid_target = next(self.validgen_target)
-                    img_train_target, gt_train_target, weight_train_target, mask_train_target = next(self.generator_target)
-                    accuracy_pred_source, pred_source = self.Session.run([self.joint_accur, self.output_source],
-                                                            feed_dict={self.img_source: img_valid_source,
-                                                                       self.gtMaps_source: gt_valid_source,
-                                                                       self.is_training: False})
+                # Reset all validation generators
+                validation_sources = [self.dataset_source._aux_generator(self.valBatchSize, self.nStack,
+                                                                          randomize=False, sample_set='valid'),
+                                      self.dataset_target._aux_generator(self.valBatchSize, self.nStack,
+                                                                         randomize=False, sample_set='valid'),
+                                      self.dataset_target._aux_generator(self.valBatchSize, self.nStack,
+                                                                         randomize=False, sample_set='test')]
+                validation_sizes = [self.dataset_source.data_sizes['valid'],
+                                    self.dataset_target.data_sizes['valid'],
+                                    self.dataset_target.data_sizes['test']]
 
-                    accuracy_pred_target, pred_target = self.Session.run([self.joint_accur, self.output_source],
-                                                            feed_dict={self.img_source: img_valid_target,
-                                                                       self.gtMaps_source: gt_valid_target,
-                                                                       self.is_training: False})
+                validation_accuracies = [0] * len(validation_sources)
+                im_summaries = [None] * len(validation_sources)
 
-                    accuracy_pred_target2, pred_target2 = self.Session.run([self.joint_accur, self.output_source],
-                                                             feed_dict={self.img_source: img_train_target,
-                                                                        self.gtMaps_source: gt_train_target,
-                                                                        self.is_training: False})
+                for iVal in range(len(validation_sources)):
 
-                    valid_summary = self.Session.run(self.test_op, feed_dict={self.img_source: img_train_target,
-                                                                              self.gtMaps_source: gt_train_target,
-                                                                              self.is_training: False})
-                    self.test_summary.add_summary(valid_summary, epoch * epochSize)
+                    accuracy_array = np.array([0.0] * len(self.joint_accur))  # Accuracy of each joint
+                    valGen = validation_sources[iVal]
+                    iValIter = 0
+                    num_iter = validation_sizes[iVal] // self.valBatchSize
 
-                    if i == 0:
+                    for (imgs, gts, weights, mask) in tqdm(valGen, total=num_iter, leave=False):
 
-                        pred_target = pred_target[:,[0],:,:,:]
-                        pred_target2 = pred_target2[:,[0],:,:,:]
+                        accuracy, pred = self.Session.run([self.joint_accur, self.output_source],
+                                                          feed_dict={self.img_source: imgs, self.gtMaps_source: gts,
+                                                                     self.is_training: False})
 
-                        mask_valid = np.expand_dims(np.expand_dims(mask_valid_target, axis=1), axis=4) > 0
-                        mask_valid = np.repeat(mask_valid, axis=4, repeats=16)
-                        pred_target[np.logical_not(mask_valid)] = np.min(pred_target)
+                        # valid_summary = self.Session.run(self.test_op, feed_dict={self.img_source: img_train_target,
+                        #                                                           self.gtMaps_source: gt_train_target,
+                        #                                                           self.is_training: False})
+                        # self.test_summary.add_summary(valid_summary, epoch * epochSize)
 
-                        mask_valid = np.expand_dims(np.expand_dims(mask_train_target, axis=1), axis=4) > 0
-                        mask_valid = np.repeat(mask_valid, axis=4, repeats=16)
-                        pred_target2[np.logical_not(mask_valid)] = np.min(pred_target2)
+                        if iValIter == 0:
 
-                        im_summaries = self._generate_im_summaries(
-                            img_valid_source, img_train_target, img_valid_target,
-                            gt_valid_source, gt_train_target, gt_valid_target,
-                            pred_source, pred_target2, pred_target
-                        )
+                            if mask is not None:
+                                # Black out the detections outside the bounding box mask
+                                pred = pred[:, [-1], :, :, :]
 
-                    accuracy_array_source += np.array(accuracy_pred_source, dtype=np.float32)
-                    accuracy_array_target += np.array(accuracy_pred_target, dtype=np.float32)
-                    accuracy_array_target2 += np.array(accuracy_pred_target2, dtype=np.float32)
+                                mask_valid = np.expand_dims(np.expand_dims(mask, axis=1), axis=4) > 0
+                                mask_valid = np.repeat(mask_valid, axis=4, repeats=pred.shape[4])
+                                pred[np.logical_not(mask_valid)] = np.min(pred)
 
-                accuracy_array_source = accuracy_array_source / validIter
-                accuracy_array_target = accuracy_array_target / validIter
-                accuracy_array_target2 = accuracy_array_target2 / validIter
-                accuracy_array_source_scalar = np.sum(accuracy_array_source) / len(accuracy_array_source)  # Convert to single scalar
-                accuracy_array_target_scalar = np.sum(accuracy_array_target) / len(accuracy_array_target)
-                accuracy_array_target2_scalar = np.sum(accuracy_array_target2) / len(accuracy_array_target2)
+                            # Save image summaries
+                            im_summaries[iVal] = self._generate_im_summaries(val_image_summary_ops[iVal], imgs, gts, pred)
+                            pass
 
-                self.logger.info('Avg. Accuracy (36M, test) = %.3f%%', accuracy_array_source_scalar * 100)
-                self.logger.info('Avg. Accuracy (MP2, train) = %.3f%%', accuracy_array_target_scalar * 100)
-                self.logger.info('Avg. Accuracy (MP2, test) = %.3f%%', accuracy_array_target2_scalar * 100)
+                        accuracy_array += accuracy
+                        iValIter += 1
+
+                    pass
+
+                    # Compute accuracy
+                    accuracy_array /= iValIter
+                    validation_accuracies[iVal] = np.sum(accuracy_array) / len(accuracy_array)  # Convert to single scalar
+                    self.logger.info('Avg. Accuracy (%s) = %.3f%%', validation_names[iVal],
+                                     validation_accuracies[iVal] * 100)
+
                 # Write to writer
-                test_summary_to_write = tf.Summary(value=[
-                    tf.Summary.Value(tag="acc_source", simple_value=accuracy_array_source_scalar),
-                    tf.Summary.Value(tag="acc_target", simple_value=accuracy_array_target_scalar),
-                    tf.Summary.Value(tag="acc_target2", simple_value=accuracy_array_target2_scalar),
-                ])
+                summaries = [tf.Summary.Value(tag="acc_{}".format(validation_names[i]), simple_value=validation_accuracies[i])
+                             for i in range(len(validation_sources))]
+                test_summary_to_write = tf.Summary(value=summaries)
                 self.test_summary.add_summary(test_summary_to_write, epoch * epochSize)
                 for im_summary in im_summaries:
-                    self.test_summary.add_summary(im_summary, epoch * epochSize)
+                    for topic in im_summary:
+                        self.test_summary.add_summary(topic, epoch * epochSize)
                 self.test_summary.flush()
 
-                self.resume['accur_source'].append(accuracy_array_source)
-                self.resume['accur_target'].append(accuracy_array_target)
-                self.resume['accur_target2'].append(accuracy_array_target2)
+                '''
+                Training
+                '''
 
                 # Training Set
-                for i in tqdm(range(epochSize)):
+                for i in tqdm(range(epochSize), leave=False):
                     sys.stdout.flush()
-                    img_train, gt_train, weight_train = next(self.generator_source)
-                    img_train_target, gt_train_target, weight_target, mask_target = next(self.generator_target)
 
+                    # Get training data
+                    try:
+                        img_train, gt_train, weight_train, _ = next(self.generator_source)
+                    except StopIteration:
+                        self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack,
+                                                                                   randomize=True, sample_set='train')
+                        img_train, gt_train, weight_train, _ = next(self.generator_source)
+
+                    try:
+                        img_train_target, gt_train_target, weight_target, mask_target = next(self.generator_target)
+                    except StopIteration:
+                        self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack,
+                                                                                   randomize=True, sample_set='train')
+
+                    # Run training
                     losses, summaries = self._run_training(img_train, gt_train, img_train_target, gt_train_target,
                                                            weight_train)
 
@@ -480,8 +461,10 @@ class HourglassModel():
                 self.logger.info('Summaries will be saved to %s' % self.logdir)
 
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'), tf.get_default_graph())
-                    # self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'))  # Do not save graph for speed
+                    if self.save_graph:
+                        self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'), tf.get_default_graph())
+                    else:
+                        self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'))  # Do not save graph for speed
                     self.test_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'test'))
 
 
@@ -732,15 +715,15 @@ class HourglassModel():
         """
         with tf.variable_scope('Test'):
             self.dataset_source.generateSet()
-            self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
+            self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack,
                                                                        sample_set='train')
-            self.validgen_source = self.dataset_source._aux_generator(self.batchSize, self.nStack, normalize=True,
+            self.validgen_source = self.dataset_source._aux_generator(self.batchSize, self.nStack,
                                                                       sample_set='valid')
 
             self.dataset_target.generateSet()
-            self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
+            self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack,
                                                                        sample_set='train')
-            self.validgen_target = self.dataset_target._aux_generator(self.batchSize, self.nStack, normalize=True,
+            self.validgen_target = self.dataset_target._aux_generator(self.batchSize, self.nStack,
                                                                       sample_set='valid')
 
             accuracy_array_source = np.array([0.0] * len(self.joint_accur))

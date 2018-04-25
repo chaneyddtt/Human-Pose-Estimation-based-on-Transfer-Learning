@@ -27,6 +27,7 @@ Abstract:
         This work is free of use, please cite the author if you use it!
 
 """
+from collections import deque
 import logging
 import logging.config
 import numpy as np
@@ -38,6 +39,7 @@ import time
 from skimage import transform
 import scipy.misc as scm
 
+import utils
 
 class DataGenerator:
     """ DataGenerator Class : To generate Train, Validatidation and Test sets
@@ -105,6 +107,7 @@ class DataGenerator:
         self.img_dir = img_dir
         self.train_data_file = train_data_file
         self.images = os.listdir(img_dir)
+        self.data_sizes = {}
 
         self.logger = logging.getLogger(self.__class__.__name__)  # Logger
 
@@ -183,28 +186,32 @@ class DataGenerator:
         return list_file
 
 
-    def _create_sets(self, validation_rate = 0.1):
+    def _create_sets(self, validation_rate = 0.05, test_rate = 0.1):
         """ Select Elements to feed training and validation set
         Args:
             validation_rate		: Percentage of validation data (in ]0,1[, don't waste time use 0.1)
         """
-        sample = len(self.train_table)
-        valid_sample = int(sample * validation_rate)
-        self.train_set = self.train_table[:sample - valid_sample]
-        self.valid_set = []
-        preset = self.train_table[sample - valid_sample:]
-        self.logger.info('Start set creation')
-        for elem in preset:
-            if self._complete_sample(elem):
-                self.valid_set.append(elem)
-            else:
-                self.train_set.append(elem)
+        # TODO Filter to consider only complete samples
+        num_before = len(self.train_table)
+        self.train_table = [elem for elem in self.train_table if self._complete_sample(elem)]
+        self.logger.info('After filtering complete data, %i / %i instances left', len(self.train_table), num_before)
 
-        self.logger.info('Set created')
-        np.save('Dataset-Validation-Set', self.valid_set)
-        np.save('Dataset-Training-Set', self.train_set)
+        nsamples = len(self.train_table)
+        valid_nsamples = int(nsamples * validation_rate)
+        test_nsamples = int(nsamples * test_rate)
+        train_nsamples = nsamples - valid_nsamples - test_nsamples
+        self.data_sizes = {'train': train_nsamples, 'valid': valid_nsamples, 'test': test_nsamples}
+
+        self.train_set = self.train_table[0 : train_nsamples]
+        self.valid_set = self.train_table[train_nsamples : train_nsamples + valid_nsamples]
+        self.test_set = self.train_table[train_nsamples + valid_nsamples : ]
+
+        # np.save('Dataset-Validation-Set', self.valid_set)
+        # np.save('Dataset-Training-Set', self.train_set)
+        # np.save('Dataset-Test-Set', self.test_set)
         self.logger.info('--Training set: %i samples', len(self.train_set))
         self.logger.info('--Validation set: %i samples', len(self.valid_set))
+        self.logger.info('--Test set: %i samples', len(self.test_set))
 
     def generateSet(self, rand = False):
         """ Generate the training and validation set
@@ -334,17 +341,16 @@ class DataGenerator:
         new_j = new_j * to_size / (max_l + 0.0000001)
         return new_j.astype(np.int32)
 
-
     def _augment(self,img, hm, mask=None, max_rotation = 30):
         """ # TODO : IMPLEMENT DATA AUGMENTATION
         """
-        if random.choice([0,1]):
-            r_angle = np.random.randint(-1*max_rotation, max_rotation)
-            # img = 	transform.rotate(img, r_angle, preserve_range = True)
-            img = transform.rotate(img, r_angle)
-            hm = transform.rotate(hm, r_angle)
+        if random.choice([0,1]):  # 50 percent chance of augmenting
+
+            r_angle = np.random.randint(-1 * max_rotation, max_rotation)
+            img = utils.rotate_about_center(img, r_angle)
+            hm = utils.rotate_about_center(hm, r_angle)
             if mask is not None:
-                mask = transform.rotate(mask, r_angle)
+                mask = utils.rotate_about_center(mask, r_angle, cv2.INTER_NEAREST)
 
         if mask is None:
             return img, hm
@@ -352,64 +358,6 @@ class DataGenerator:
             return img, hm, mask
 
     # ----------------------- Batch Generator ----------------------------------
-
-    def _generator(self, batch_size = 16, stacks = 4, set = 'train', stored = False, normalize = True, debug = False):
-        """ Create Generator for Training
-        Args:
-            batch_size	: Number of images per batch
-            stacks			: Number of stacks/module in the network
-            set				: Training/Testing/Validation set # TODO: Not implemented yet
-            stored			: Use stored Value # TODO: Not implemented yet
-            normalize		: True to return Image Value between 0 and 1
-            _debug			: Boolean to test the computation time (/!\ Keep False)
-        # Done : Optimize Computation time
-            16 Images --> 1.3 sec (on i7 6700hq)
-        """
-        while True:
-            if debug:
-                t = time.time()
-            train_img = np.zeros((batch_size, 256,256,3), dtype = np.float32)
-            train_gtmap = np.zeros((batch_size, stacks, 64, 64, len(self.joints_list)), np.float32)
-            files = self._give_batch_name(batch_size= batch_size, set = set)
-            for i, name in enumerate(files):
-                if name[:-1] in self.images:
-                    try :
-                        img = self.open_img(name)
-                        joints = self.data_dict[name]['joints']
-                        box = self.data_dict[name]['box']
-                        if debug:
-                            print(box)
-                        padd, cbox = self._crop_data(img.shape[0], img.shape[1], box, joints, boxp = 0.2)
-                        if debug:
-                            print(cbox)
-                            print('maxl :', max(cbox[2], cbox[3]))
-                        new_j = self._relative_joints(cbox,padd, joints, to_size=64)
-                        hm = self._generate_hm(64, 64, new_j, 64, weight)
-                        img = self._crop_img(img, padd, cbox)
-                        img = img.astype(np.uint8)
-                        # On 16 image per batch
-                        # Avg Time -OpenCV : 1.0 s -skimage: 1.25 s -scipy.misc.imresize: 1.05s
-                        img = scm.imresize(img, (256,256))
-                        # Less efficient that OpenCV resize method
-                        #img = transform.resize(img, (256,256), preserve_range = True, mode = 'constant')
-                        # May Cause trouble, bug in OpenCV imgwrap.cpp:3229
-                        # error: (-215) ssize.area() > 0 in function cv::resize
-                        #img = cv2.resize(img, (256,256), interpolation = cv2.INTER_CUBIC)
-                        img, hm = self._augment(img, hm)
-                        hm = np.expand_dims(hm, axis = 0)
-                        hm = np.repeat(hm, stacks, axis = 0)
-                        if normalize:
-                            train_img[i] = img.astype(np.float32) / 255
-                        else :
-                            train_img[i] = img.astype(np.float32)
-                        train_gtmap[i] = hm
-                    except :
-                        i = i-1
-                else:
-                    i = i - 1
-            if debug:
-                print('Batch : ',time.time() - t, ' sec.')
-            yield train_img, train_gtmap
 
     def _generate_mask(self, box, padd, cbox):
         box_2d = np.reshape(box, (2,2))
@@ -419,24 +367,37 @@ class DataGenerator:
                       (box_2d_cropped[0,0], box_2d_cropped[0,1]), (box_2d_cropped[1,0], box_2d_cropped[1,1]),
                       (255,255,255), -1 )
 
-
-    def _aux_generator(self, batch_size = 16, stacks = 4, normalize = True, sample_set = 'train'):
+    def _aux_generator(self, batch_size = 16, stacks = 4, normalize = True, sample_set = 'train', randomize=True):
         """ Auxiliary Generator
         Args:
             See Args section in self._generator
         """
+
+        assert sample_set in ['train', 'valid', 'test']
+
+        # Initialize
+        if sample_set == 'train':
+            dataset = self.train_set
+        elif sample_set == 'valid':
+            dataset = self.valid_set
+        else:
+            dataset = self.test_set
+        indices = deque(np.random.permutation(len(dataset))) if randomize else deque(list(range(len((dataset)))))
+
         while True:
             train_img = np.zeros((batch_size, 256,256,3), dtype = np.float32)
             train_gtmap = np.zeros((batch_size, stacks, 64, 64, len(self.joints_list)), np.float32)
             train_mask = np.zeros((batch_size, 64, 64), np.uint8)
             train_weights = np.zeros((batch_size, len(self.joints_list)), np.float32)
-            i = 0
-            while i < batch_size:
-                # try:
-                if sample_set == 'train':
-                    name = random.choice(self.train_set)
-                elif sample_set == 'valid':
-                    name = random.choice(self.valid_set)
+
+            for i in range(batch_size):
+
+                try:
+                    idx = indices.pop()
+                    name = dataset[idx]
+                except IndexError:
+                    return
+
                 joints = self.data_dict[name]['joints']
                 box = self.data_dict[name]['box']
                 weight = np.asarray(self.data_dict[name]['weights'])
@@ -459,9 +420,7 @@ class DataGenerator:
                     train_img[i] = img.astype(np.float32)
                 train_gtmap[i] = hm
                 train_mask[i,:,:] = mask
-                i = i + 1
-            # except :
-            # 	print('error file: ', name)
+
             yield train_img, train_gtmap, train_weights, train_mask
 
     def generator(self, batchSize = 16, stacks = 4, norm = True, sample = 'train'):

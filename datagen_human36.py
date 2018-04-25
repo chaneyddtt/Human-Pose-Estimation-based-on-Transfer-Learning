@@ -30,6 +30,7 @@ Abstract:
 import logging
 import logging.config
 import numpy as np
+from collections import deque
 import cv2
 import os
 import matplotlib.pyplot as plt
@@ -40,6 +41,7 @@ import scipy.misc as scm
 from scipy.special import expit
 import h5py
 
+import utils
 
 class DataGenerator_human36():
     """ DataGenerator Class : To generate Train, Validatidation and Test sets
@@ -246,6 +248,10 @@ class DataGenerator_human36():
 
         self.train_set = [t for t in self.train_table if self._complete_sample(t)]
         self.valid_set = [v for v in self.valid_table if self._complete_sample(v)]
+        self.data_sizes = {'train': len(self.train_set), 'valid': len(self.valid_set), 'test':0}
+
+        # Subsample to 1% of original validation set for speed
+        self.valid_set = self.valid_set[0::100]
 
         self.logger.info('Set created')
 
@@ -315,11 +321,13 @@ class DataGenerator_human36():
     def _augment(self, img, hm, max_rotation=30):
         """ # TODO : IMPLEMENT DATA AUGMENTATION
         """
-        if random.choice([0, 1]):
+        if random.choice([0, 1]):  # 50% chance of augmenting
+
+            # Rotate
             r_angle = np.random.randint(-1 * max_rotation, max_rotation)
-            # img = 	transform.rotate(img, r_angle, preserve_range = True)
-            img = transform.rotate(img, r_angle)
-            hm = transform.rotate(hm, r_angle)
+            img = utils.rotate_about_center(img, r_angle)
+            hm = utils.rotate_about_center(hm, r_angle)
+
         return img, hm
 
     # ----------------------- Batch Generator ----------------------------------
@@ -367,22 +375,30 @@ class DataGenerator_human36():
                 print('Batch : ', time.time() - t, ' sec.')
             yield train_img, train_gtmap
 
-    def _aux_generator(self, batch_size=16, stacks=4, normalize=True, sample_set='train'):
+    def _aux_generator(self, batch_size=16, stacks=4, normalize=True, sample_set='train', randomize=True):
         """ Auxiliary Generator
         Args:
             See Args section in self._generator
         """
+        assert sample_set in ['train', 'valid']
+
+        # Initialize
+        dataset = self.train_set if sample_set == 'train' else self.valid_set
+        indices = deque(np.random.permutation(len(dataset))) if randomize else deque(list(range(len((dataset)))))
+
+        # Yield until no more
         while True:
             train_img = np.zeros((batch_size, 256, 256, 3), dtype=np.float32)
             train_gtmap = np.zeros((batch_size, stacks, 64, 64, len(self.joints_list)), np.float32)
             train_weights = np.zeros((batch_size, len(self.joints_list)), np.float32)
-            i = 0
-            while i < batch_size:
-                # try:
-                if sample_set == 'train':
-                    name = random.choice(self.train_set)
-                elif sample_set == 'valid':
-                    name = random.choice(self.valid_set)
+
+            for i in range(batch_size):
+                try:
+                    idx = indices.pop()
+                    name = dataset[idx]
+                except IndexError:
+                    return
+
                 joints = self.data_dict[name]['joints']
                 weight = self.data_dict[name]['weights']
                 train_weights[i] = weight
@@ -400,10 +416,8 @@ class DataGenerator_human36():
                 else:
                     train_img[i] = img.astype(np.float32)
                 train_gtmap[i] = hm
-                i = i + 1
-            # except :
-            # 	print('error file: ', name)
-            yield train_img, train_gtmap, train_weights
+
+            yield train_img, train_gtmap, train_weights, None
 
     def generator(self, batchSize=16, stacks=4, norm=True, sample='train'):
         """ Create a Sample Generator
@@ -549,6 +563,20 @@ def color_heatmap(hm, resize_to=None, apply_sigmoid=False):
 
 if __name__ == '__main__':
 
+    data_gen = DataGenerator_human36()
+    data_gen.generateSet()
+    generator_source = data_gen._aux_generator(32, 4, normalize=True, sample_set='train')
+
+    plt.figure()
+    while True:
+        imgs,b,c = next(generator_source)
+        plt.figure()
+        plt.imshow(imgs[0,:,:,:])
+        print('img range: ', np.min(imgs[0,:,:,:]), '-', np.max(imgs[0,:,:,:]))
+        plt.show()
+
+    exit()
+###
     logging.config.fileConfig('logging.conf')
 
     data_gen=DataGenerator_human36()
