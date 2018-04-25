@@ -27,7 +27,8 @@ Abstract:
         This work is free of use, please cite the author if you use it!
 
 """
-import logging, logging.config
+import logging
+import logging.config
 import numpy as np
 import cv2
 import os

@@ -50,8 +50,7 @@ class HourglassModel_gan(HourglassModel):
     def generate_model(self):
         """ Create the complete graph
         """
-        startTime = time.time()
-        print('CREATE MODEL:')
+        self.logger.info('Creating model')
         with tf.device(self.gpu):
             with tf.variable_scope('inputs'):
                 # Shape Input Image - batchSize: None, height: 256, width: 256, channel: 3 (RGB)
@@ -66,8 +65,6 @@ class HourglassModel_gan(HourglassModel):
             # TODO : Implement weighted loss function
             # NOT USABLE AT THE MOMENT
             # weights = tf.placeholder(dtype = tf.float32, shape = (None, self.nStack, 1, 1, self.outDim))
-            inputTime = time.time()
-            print('---Inputs : Done (' + str(int(abs(inputTime - startTime))) + ' sec.)')
 
             with tf.variable_scope(self.model_name):
                 self.output_source, self.enc_repre_source = self._graph_hourglass(self.img_source)

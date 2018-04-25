@@ -27,6 +27,8 @@ Abstract:
         This work is free of use, please cite the author if you use it!
 
 """
+import logging
+import logging.config
 import numpy as np
 import cv2
 import os
@@ -104,6 +106,8 @@ class DataGenerator:
         self.train_data_file = train_data_file
         self.images = os.listdir(img_dir)
 
+        self.logger = logging.getLogger(self.__class__.__name__)  # Logger
+
     # --------------------Generator Initialization Methods ---------------------
 
 
@@ -124,7 +128,7 @@ class DataGenerator:
         self.no_intel = []
         self.data_dict = {}
         input_file = open(self.train_data_file, 'r')
-        print('READING TRAIN DATA')
+        self.logger.info('Reading train data')
         for line in input_file:
             line = line.strip()
             line = line.split(' ')
@@ -173,7 +177,8 @@ class DataGenerator:
             elif set == 'valid':
                 list_file.append(random.choice(self.valid_set))
             else:
-                print('Set must be : train/valid')
+                self.logger.error('Set must be : train/valid')
+                raise ValueError()
                 break
         return list_file
 
@@ -188,18 +193,18 @@ class DataGenerator:
         self.train_set = self.train_table[:sample - valid_sample]
         self.valid_set = []
         preset = self.train_table[sample - valid_sample:]
-        print('START SET CREATION')
+        self.logger.info('Start set creation')
         for elem in preset:
             if self._complete_sample(elem):
                 self.valid_set.append(elem)
             else:
                 self.train_set.append(elem)
 
-        print('SET CREATED')
+        self.logger.info('Set created')
         np.save('Dataset-Validation-Set', self.valid_set)
         np.save('Dataset-Training-Set', self.train_set)
-        print('--Training set :', len(self.train_set), ' samples.')
-        print('--Validation set :', len(self.valid_set), ' samples.')
+        self.logger.info('--Training set: %i samples', len(self.train_set))
+        self.logger.info('--Validation set: %i samples', len(self.valid_set))
 
     def generateSet(self, rand = False):
         """ Generate the training and validation set
@@ -485,9 +490,10 @@ class DataGenerator:
         elif color == 'BGR':
             return img
         elif color == 'GRAY':
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         else:
-            print('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
+            self.logger.error('Color mode supported: RGB/BGR. If you need another mode do it yourself :p')
+            raise NotImplementedError()
 
     def plot_img(self, name, plot = 'plt'):
         """ Plot an image

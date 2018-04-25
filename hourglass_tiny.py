@@ -83,17 +83,18 @@ class HourglassModel():
         self.cpu = '/cpu:0'
         self.gpu = '/gpu:%i' % gpu
         self.logdir = logdir
-        self.logdir_with_time = None
         self.joints = joints
         self.w_loss = w_loss
         self.dis_name='discriminator'
         self.model_name='hourglass_first'
         self.is_training = tf.placeholder(tf.bool)
 
+        self.init = None  # Initialization function
+
         self.logger = logging.getLogger(self.__class__.__name__)  # Logger
         self.logger.info('Running on GPU: %s' % self.gpu)
 
-        self.logger.info('Dropout rate: %i', drop_rate)
+        self.logger.info('Dropout rate: %.2f', drop_rate)
 
         # For saving image summary tensors
         self.result_source_val_pl = tf.placeholder(tf.uint8, (None, None, None, 3))
@@ -164,8 +165,7 @@ class HourglassModel():
     def generate_model(self):
         """ Create the complete graph
         """
-        startTime = time.time()
-        print('CREATE MODEL:')
+        self.logger.info('Creating model')
         with tf.device(self.gpu):
             with tf.variable_scope('inputs'):
                 # Shape Input Image - batchSize: None, height: 256, width: 256, channel: 3 (RGB)
@@ -179,10 +179,8 @@ class HourglassModel():
             # TODO : Implement weighted loss function
             # NOT USABLE AT THE MOMENT
             # weights = tf.placeholder(dtype = tf.float32, shape = (None, self.nStack, 1, 1, self.outDim))
-            inputTime = time.time()
-            print('---Inputs : Done (' + str(int(abs(inputTime - startTime))) + ' sec.)')
 
-            with tf.variable_scope('transfer_model'):
+            with tf.variable_scope('hourglass'):
                 self.output_source, self.enc_repre_source = self._graph_hourglass(self.img_source)
 
             self.logger.info('Hourglass output size %s' % self.output_source.shape)
@@ -403,7 +401,7 @@ class HourglassModel():
 
                     if epoch * epochSize + i % 500 == 0 and epoch * epochSize + i > 0:
                         with tf.variable_scope('save'):
-                            self.saver.save(self.Session, os.path.join(self.logdir_with_time, 'ckpt', 'model.ckpt'), epoch * epochSize + i)
+                            self.saver.save(self.Session, os.path.join(self.logdir, 'ckpt', 'model.ckpt'), epoch * epochSize + i)
 
             print('Training Done')
 
@@ -479,13 +477,12 @@ class HourglassModel():
             if summary:
 
                 dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-                self.logdir_with_time = os.path.join(self.logdir, dn_prefix)
-                self.logger.info('Summaries will be saved to %s' % self.logdir_with_time)
+                self.logger.info('Summaries will be saved to %s' % self.logdir)
 
                 with tf.device(self.gpu):
-                    self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir_with_time, 'train'), tf.get_default_graph())
-                    # self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir_with_time, 'train'))  # Do not save graph for speed
-                    self.test_summary = tf.summary.FileWriter(os.path.join(self.logdir_with_time, 'test'))
+                    self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'), tf.get_default_graph())
+                    # self.train_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'train'))  # Do not save graph for speed
+                    self.test_summary = tf.summary.FileWriter(os.path.join(self.logdir, 'test'))
 
 
     def _init_weight(self):
@@ -519,50 +516,52 @@ class HourglassModel():
         1. Preprocessing convolution kernel size changed to 7
         2. Streamlined the creation of hourglass modules
         3. Remove self.modif conditions
+        4. Corrected residual link ll_ to point correctly
+        5. Remove variable scoping
         """
-        with tf.variable_scope('hourglass'):
-            with tf.variable_scope('preprocessing'):
-                # Dim pad1 : nbImages x 256 x 256 x 3
-                conv1 = self._conv_bn_relu(inputs, filters=64, kernel_size=7, strides=2, name='conv_256_to_128', pad='SAME')
-                # Dim conv1 : nbImages x 128 x 128 x 64
-                r1 = self._residual(conv1, numOut=128, name='r1')
-                # Dim pad1 : nbImages x 128 x 128 x 128
-                pool1 = tf.contrib.layers.max_pool2d(r1, [2, 2], [2, 2], padding='VALID')
-                # Dim pool1 : nbImages x 64 x 64 x 128
-                r2 = self._residual(pool1, numOut=int(self.nFeat / 2), name='r2')
-                r3 = self._residual(r2, numOut=self.nFeat, name='r3')  # Input to hourglass units
 
-            # Storage Table
-            enc_repre = [None] * self.nStack
-            hg = [None] * self.nStack
-            ll = [None] * self.nStack
-            ll_ = [None] * self.nStack
-            drop = [None] * self.nStack
-            out = [None] * self.nStack
-            out_ = [None] * self.nStack
-            sum_ = [None] * self.nStack
+        with tf.variable_scope('preprocessing'):
+            # Dim pad1 : nbImages x 256 x 256 x 3
+            conv1 = self._conv_bn_relu(inputs, filters=64, kernel_size=7, strides=2, name='conv_256_to_128', pad='SAME')
+            # Dim conv1 : nbImages x 128 x 128 x 64
+            r1 = self._residual(conv1, numOut=128, name='r1')
+            # Dim pad1 : nbImages x 128 x 128 x 128
+            pool1 = tf.contrib.layers.max_pool2d(r1, [2, 2], [2, 2], padding='VALID')
+            # Dim pool1 : nbImages x 64 x 64 x 128
+            r2 = self._residual(pool1, numOut=int(self.nFeat / 2), name='r2')
+            r3 = self._residual(r2, numOut=self.nFeat, name='r3')  # Input to hourglass units
 
-            hourglass_out = r3
+        # Storage Table
+        enc_repre = [None] * self.nStack
+        hg = [None] * self.nStack
+        ll = [None] * self.nStack
+        ll_ = [None] * self.nStack
+        drop = [None] * self.nStack
+        out = [None] * self.nStack
+        out_ = [None] * self.nStack
+        sum_ = [None] * self.nStack
 
-            with tf.variable_scope('stacks'):
+        hourglass_out = r3
 
-                for i in range(0, self.nStack):
-                    with tf.variable_scope('stage_' + str(i)):
-                        hg[i], enc_repre[i] = self._hourglass(hourglass_out, self.nLow, self.nFeat, 'hourglass')
-                        drop[i] = tf.layers.dropout(hg[i], rate=self.dropout_rate, training=self.is_training,
-                                                    name='dropout')
-                        ll[i] = self._conv_bn_relu(drop[i], self.nFeat, 1, 1, 'VALID', name='conv')
-                        
-                        out[i] = self._conv(ll[i], self.outDim, 1, 1, 'VALID', 'out')
+        with tf.variable_scope('stacks'):
 
-                        if i < self.nStack-1:
-                            ll_[i] = self._conv(ll[i], self.nFeat, 1, 1, 'VALID', 'll')
-                            out_[i] = self._conv(out[i], self.nFeat, 1, 1, 'VALID', 'out_')
-                            sum_[i] = tf.add_n([out_[i], hourglass_out, ll_[i]], name='merge')
+            for i in range(0, self.nStack):
+                with tf.variable_scope('stage_' + str(i)):
+                    hg[i], enc_repre[i] = self._hourglass(hourglass_out, self.nLow, self.nFeat, 'hourglass')
+                    drop[i] = tf.layers.dropout(hg[i], rate=self.dropout_rate, training=self.is_training,
+                                                name='dropout')
+                    ll[i] = self._conv_bn_relu(drop[i], self.nFeat, 1, 1, 'VALID', name='conv')
 
-                            hourglass_out = sum_[i]
+                    out[i] = self._conv(ll[i], self.outDim, 1, 1, 'VALID', 'out')
 
-            return tf.stack(out, axis=1, name='final_output'), enc_repre
+                    if i < self.nStack-1:
+                        ll_[i] = self._conv(ll[i], self.nFeat, 1, 1, 'VALID', 'll')
+                        out_[i] = self._conv(out[i], self.nFeat, 1, 1, 'VALID', 'out_')
+                        sum_[i] = tf.add_n([out_[i], hourglass_out, ll_[i]], name='merge')
+
+                        hourglass_out = sum_[i]
+
+        return tf.stack(out, axis=1, name='final_output'), enc_repre
 
     def _conv(self, inputs, filters, kernel_size=1, strides=1, pad='VALID', name='conv'):
         """ Spatial Convolution (CONV2D)
