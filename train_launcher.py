@@ -13,6 +13,7 @@ from datagen_human36 import DataGenerator_human36
 import argparse
 import logging, logging.config
 import os
+import shutil
 
 def process_config(conf_file):
     """
@@ -59,7 +60,7 @@ params = process_config('config.cfg')
 dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
 args.name = args.name.strip('\'')
 if len(args.name) > 0:
-    dn_prefix += '_' + args.name
+    dn_prefix += ' (' + args.name + ')'
 logdir = os.path.join(params['log_dir'], dn_prefix)
 make_dir_if_not_exist(logdir)
 
@@ -70,6 +71,7 @@ logFormatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(messa
 fileHandler.setFormatter(logFormatter)
 logger.addHandler(fileHandler)
 logger.info("Logs will be written to %s" % logdir)
+shutil.copy('config.cfg', logdir)
 
 
 if __name__ == '__main__':
@@ -106,7 +108,7 @@ if __name__ == '__main__':
                                drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
                                decay=params['learning_rate_decay'], decay_step=params['decay_step'],
                                dataset_source=dataset_source,dataset_target=dataset_target,
-                               name=params['name'], logdir=params['log_dir'],
+                               name=params['name'], logdir=logdir,
                                w_loss=params['weighted_loss'],
                                joints=params['joint_list'], gpu=args.gpu)
     elif args.network == 'hourglass_gan':
@@ -115,7 +117,7 @@ if __name__ == '__main__':
                                drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
                                decay=params['learning_rate_decay'], decay_step=params['decay_step'],
                                dataset_source=dataset_source, dataset_target=dataset_target,
-                               name=params['name'], logdir=params['log_dir'],
+                               name=params['name'], logdir=logdir,
                                w_loss=params['weighted_loss'],
                                joints=params['joint_list'], gpu=args.gpu)
     else:
