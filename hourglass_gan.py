@@ -75,12 +75,12 @@ class HourglassModel_gan(HourglassModel):
                 self.output_target, self.enc_repre_target = self._graph_hourglass(self.img_target)
 
             with tf.variable_scope(self.dis_name):
-                d_logits_source = self.discriminator(self.enc_repre_source[0],
+                d_logits_source = self.discriminator(self.enc_repre_source[-1],
                                               self.output_source,
                                               trainable=True,
                                               is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
-                d_logits_target = self.discriminator(self.enc_repre_target[0],
+                d_logits_target = self.discriminator(self.enc_repre_target[-1],
                                                self.output_target,
                                                trainable=True,
                                                is_training=self.is_training)
