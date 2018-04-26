@@ -67,20 +67,28 @@ class HourglassModel_gan(HourglassModel):
             # weights = tf.placeholder(dtype = tf.float32, shape = (None, self.nStack, 1, 1, self.outDim))
 
             with tf.variable_scope(self.model_name):
-                self.output_source, self.enc_repre_source = self._graph_hourglass(self.img_source)
+                self.output_source, enc_repre_source = self._graph_hourglass(self.img_source)
             with tf.variable_scope(self.model_name,reuse=True):
-                self.output_target, self.enc_repre_target = self._graph_hourglass(self.img_target)
+                self.output_target, enc_repre_target = self._graph_hourglass(self.img_target)
+
+            # Stack the encoding features from different hourglass
+            # enc_repre_source_flattened = enc_repre_source[-1]
+            # enc_repre_target_flattened = enc_repre_target[-1]
+            enc_repre_source_flattened = tf.concat(enc_repre_source, axis=3)
+            enc_repre_target_flattened = tf.concat(enc_repre_target, axis=3)
+            output_source_flattened = tf.squeeze(tf.concat(tf.split(self.output_source, self.nStack, axis=1), axis=4), axis=1)
+            output_target_flattened = tf.squeeze(tf.concat(tf.split(self.output_target, self.nStack, axis=1), axis=4), axis=1)
 
             with tf.variable_scope(self.dis_name):
-                d_logits_source = self.discriminator(self.enc_repre_source[-1],
-                                              self.output_source,
-                                              trainable=True,
-                                              is_training=self.is_training)
+                d_logits_source = self.discriminator(enc_repre_source_flattened,
+                                                     output_source_flattened,
+                                                     trainable=True,
+                                                     is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
-                d_logits_target = self.discriminator(self.enc_repre_target[-1],
-                                               self.output_target,
-                                               trainable=True,
-                                               is_training=self.is_training)
+                d_logits_target = self.discriminator(enc_repre_target_flattened,
+                                                     output_target_flattened,
+                                                     trainable=True,
+                                                     is_training=self.is_training)
 
             # Discriminator loss
             d_logits = tf.concat([d_logits_source, d_logits_target], axis=0)
@@ -194,7 +202,7 @@ class HourglassModel_gan(HourglassModel):
 
         h1=tf.nn.relu(tcl.batch_norm(tcl.conv2d(input,
                                                 num_outputs=1024,
-                                                kernel_size=[3,3],
+                                                kernel_size=[2,2],
                                                 stride=2,
                                                 padding='SAME',
                                                 scope='conv1'),
@@ -204,21 +212,24 @@ class HourglassModel_gan(HourglassModel):
         h1 = tf.layers.dropout(h1, rate=self.dropout_rate, training=is_training, name='dropout_dis')
         h1_flatten=tcl.flatten(h1)
 
-        # output = tf.squeeze(output, axis=1)
-        # h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
-        #                                         num_outputs=1024,
-        #                                         kernel_size=[output.shape[1], output.shape[2]],
-        #                                         stride=1,
-        #                                         padding='valid',
-        #                                         scope='conv1_b'),
-        #                                         trainable=trainable,
-        #                                         scope="bn1_b",
-        #                                         is_training=is_training))
-        # h1_b_flatten = tcl.flatten(h1_b)
-        #
-        # h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+        # # only use features
+        # h1_cat = h1_flatten
 
-        h1_cat = h1_flatten
+        # Use also poses
+        output = tf.contrib.layers.max_pool2d(output, [2, 2], [2, 2], padding='VALID')
+        h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
+                                                num_outputs=1024,
+                                                kernel_size=[output.shape[1], output.shape[2]],
+                                                stride=1,
+                                                padding='valid',
+                                                scope='conv1_b'),
+                                                trainable=trainable,
+                                                scope="bn1_b",
+                                                is_training=is_training))
+        h1_b_flatten = tcl.flatten(h1_b)
+
+        h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+
 
         h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
         h3= tcl.fully_connected(h2, 1, activation_fn=None)  # 2 classes: Source or target
