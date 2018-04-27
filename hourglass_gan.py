@@ -36,7 +36,8 @@ import tensorflow.contrib.layers as tcl
 
 from hourglass_tiny import HourglassModel
 
-CONFUSION_WEIGHT = 0.2
+CONFUSION_WEIGHT = 0.1
+POSE_CONFUSION_WEIGHT = 0.0
 
 
 class HourglassModel_gan(HourglassModel):
@@ -78,43 +79,46 @@ class HourglassModel_gan(HourglassModel):
             # enc_repre_target_flattened = enc_repre_target[-1]
             enc_repre_source_flattened = tf.concat(enc_repre_source, axis=3)
             enc_repre_target_flattened = tf.concat(enc_repre_target, axis=3)
-            output_source_flattened = tf.squeeze(tf.concat(tf.split(self.output_source, self.nStack, axis=1), axis=4), axis=1)
-            output_target_flattened = tf.squeeze(tf.concat(tf.split(self.output_target, self.nStack, axis=1), axis=4), axis=1)
+            gt_source_flattened = self.gtMaps_source[:, -1, :, :, :]
+            output_target_flattened = self.output_target[:, -1, :, :, :]
 
             with tf.variable_scope(self.dis_name):
-                d_logits_source = self.discriminator(enc_repre_source_flattened,
-                                                     output_source_flattened,
-                                                     trainable=True,
-                                                     is_training=self.is_training)
+                d_enc_source = self.discriminator(enc_repre_source_flattened,
+                                                  trainable=True,
+                                                  is_training=self.is_training)
+                d_pose_source, _ = self.discriminator_pose(gt_source_flattened, is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
-                d_logits_target = self.discriminator(enc_repre_target_flattened,
-                                                     output_target_flattened,
-                                                     trainable=True,
-                                                     is_training=self.is_training)
+                d_enc_target = self.discriminator(enc_repre_target_flattened,
+                                                  trainable=True,
+                                                  is_training=self.is_training)
+                d_pose_target, _ = self.discriminator_pose(output_target_flattened, is_training=self.is_training)
 
             # Discriminator loss
-            d_logits = tf.concat([d_logits_source, d_logits_target], axis=0)
-            d_groundtruth = tf.concat([tf.zeros_like(d_logits_source), tf.ones_like(d_logits_target)], axis=0)
-            self.d_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_logits))
+            d_groundtruth = tf.concat([tf.zeros_like(d_enc_source), tf.ones_like(d_enc_target)], axis=0)
+            # 1. Encoding
+            d_enc_logits = tf.concat([d_enc_source, d_enc_target], axis=0)
+            d_enc_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_enc_logits))
+            # # 2. Pose
+            d_pose_logits = tf.concat([d_pose_source, d_pose_target], axis=0)
+            d_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_pose_logits))
+            # Sum
+            self.d_loss = CONFUSION_WEIGHT * d_enc_loss + POSE_CONFUSION_WEIGHT * d_pose_loss
 
             # Confusion loss
             c_desired = tf.fill(tf.shape(d_groundtruth), 0.5)  # Uniform distribution
-            self.c_loss =tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_logits))
-
-            self.d_logits = d_logits
-            self.d_groundtruth = d_groundtruth
-            self.c_desired = c_desired
+            c_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_enc_logits))
+            c_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_pose_logits))
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
-                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')+0.01*self.c_loss
+                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')+0.01*c_loss
                 else:
                     self.p_loss = tf.reduce_mean(
                         tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
                         name='cross_entropy_loss')
-                self.loss = self.p_loss + CONFUSION_WEIGHT*self.c_loss
+                self.loss = self.p_loss + CONFUSION_WEIGHT * c_loss + POSE_CONFUSION_WEIGHT * c_pose_loss
 
-            self.logger.info('Confusion weight: %f', CONFUSION_WEIGHT)
+            self.logger.info('Confusion weight: %f (enc), %f (pose)', CONFUSION_WEIGHT, POSE_CONFUSION_WEIGHT)
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
@@ -145,7 +149,7 @@ class HourglassModel_gan(HourglassModel):
         with tf.device(self.cpu):
             with tf.variable_scope('training'):
                 tf.summary.scalar('loss', self.loss, collections=['train_enc'])
-                tf.summary.scalar('Confusion loss', self.c_loss, collections=['train_enc'])
+                tf.summary.scalar('Confusion loss', c_loss, collections=['train_enc'])
                 tf.summary.scalar('Pose loss', self.p_loss, collections=['train_enc'])
 
                 tf.summary.scalar('Discriminator', self.d_loss, collections=['train_d'])
@@ -202,40 +206,39 @@ class HourglassModel_gan(HourglassModel):
 
         return losses, summaries
 
-    def discriminator(self, input, output, trainable=True, is_training=True):
+    def discriminator_pose(self, heatmap, is_training=True):
+        with tf.variable_scope('discriminator_pose'):
+            heatmap_small = tf.contrib.layers.max_pool2d(heatmap, [2, 2], [2, 2], padding='VALID')
+            joints_pred = tcl.spatial_softmax(heatmap_small, temperature=0.1, trainable=False)
+            net_j = tcl.fully_connected(joints_pred, 128)
+            net_j = tf.layers.dropout(net_j, rate=self.dropout_rate, training=is_training)
+            net_j = tcl.fully_connected(net_j, 128)
+            net_j = tf.layers.dropout(net_j, rate=self.dropout_rate, training=is_training)
+            pred = tcl.fully_connected(net_j, 1, activation_fn=None)
 
-        h1=tf.nn.relu(tcl.batch_norm(tcl.conv2d(input,
-                                                num_outputs=1024,
-                                                kernel_size=[2,2],
-                                                stride=2,
-                                                padding='SAME',
-                                                scope='conv1'),
-                                                trainable=trainable,
-                                                scope="bn1",
-                                                is_training=is_training))
-        h1 = tf.layers.dropout(h1, rate=self.dropout_rate, training=is_training, name='dropout_dis')
-        h1_flatten=tcl.flatten(h1)
+        return pred, joints_pred
 
-        # # only use features
-        h1_cat = h1_flatten
+    def discriminator(self, input, trainable=True, is_training=True):
 
-        # Use also poses
-        # output = tf.contrib.layers.max_pool2d(output, [2, 2], [2, 2], padding='VALID')
-        # h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
-        #                                         num_outputs=1024,
-        #                                         kernel_size=[output.shape[1], output.shape[2]],
-        #                                         stride=1,
-        #                                         padding='valid',
-        #                                         scope='conv1_b'),
-        #                                         trainable=trainable,
-        #                                         scope="bn1_b",
-        #                                         is_training=is_training))
-        # h1_b_flatten = tcl.flatten(h1_b)
-        # h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+        with tf.variable_scope('discriminator_enc'):
+            h1=tf.nn.relu(tcl.batch_norm(tcl.conv2d(input,
+                                                    num_outputs=1024,
+                                                    kernel_size=[2,2],
+                                                    stride=2,
+                                                    padding='SAME',
+                                                    scope='conv1'),
+                                                    trainable=trainable,
+                                                    scope="bn1",
+                                                    is_training=is_training))
+            h1 = tf.layers.dropout(h1, rate=self.dropout_rate, training=is_training, name='dropout_dis')
+            h1_flatten=tcl.flatten(h1)
 
+            # # only use features
+            h1_cat = h1_flatten
 
-        h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
-        h3= tcl.fully_connected(h2, 1, activation_fn=None)  # 2 classes: Source or target
+            h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")
+            h3= tcl.fully_connected(h2, 1, activation_fn=None)  # 2 classes: Source or target
+
         return h3
 
 if __name__ == '__main__':

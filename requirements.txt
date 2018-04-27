@@ -1,0 +1,6 @@
+h5py
+opencv-python
+scipy
+scikit-image
+tensorflow-gpu >= 1.5
+tqdm
