@@ -13,6 +13,7 @@ from datagen_human36 import DataGenerator_human36
 import argparse
 import logging, logging.config
 import os
+import sys
 import shutil
 
 def process_config(conf_file):
@@ -52,6 +53,7 @@ parse.add_argument("--network", help="choose a network", default='hourglass_gan'
 parse.add_argument("--gpu", help="Select GPU (default: 0)", default=0, type=int)
 parse.add_argument("--name", help="Name of run (used to name tf.Summary)", default='', type=str)
 parse.add_argument("--no_save_graph", help="If set, graph will not be save in tf summaries (speeds up init)", action='store_true')
+parse.add_argument("--load", help="Checkpoint to resume from", default=None, type=str)
 args = parse.parse_args()
 
 # Parse config
@@ -75,7 +77,17 @@ logger.info("Logs will be written to %s" % logdir)
 shutil.copy('config.cfg', logdir)
 
 
+def log_arguments():
+    logger.info('Command: %s', ' '.join(sys.argv))
+
+    s = '\n'.join(['    {}: {}'.format(arg, getattr(args, arg)) for arg in vars(args)])
+    s = 'Arguments:\n' + s
+    logger.info(s)
+
+
 if __name__ == '__main__':
+
+    log_arguments()
 
     #
     # print('--Creating Dataset')
@@ -128,4 +140,4 @@ if __name__ == '__main__':
 
     model.generate_model()
     # modelPath='/home/lichen/pose_estimation/hourglasstensorlfow/hourglassModel_tiny_1stack/hg_refined_200_200'
-    model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=None)
+    model.training_init(nEpochs=params['nepochs'], epochSize=params['epoch_size'], saveStep=params['saver_step'],load=args.load)

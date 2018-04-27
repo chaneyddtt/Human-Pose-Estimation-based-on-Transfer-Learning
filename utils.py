@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from scipy.special import expit
-
+from tensorflow.python import pywrap_tensorflow
 
 def rotate_about_center(img, deg, scale=1.0, flags=cv2.INTER_LINEAR):
     # Rotate
@@ -69,3 +69,17 @@ def color_heatmap(hm, resize_to=None, apply_sigmoid=False):
     dst = cv2.cvtColor(dst, cv2.COLOR_BGR2RGB)
 
     return dst
+
+def get_tensors_in_checkpoint_file(file_name):
+    """Get tensors in a checkpoint file.
+    If no `tensor_name` is provided, prints the tensor names and shapes
+    in the checkpoint file.
+    If `tensor_name` is provided, prints the content of the tensor.
+    Args:
+    file_name: Name of the checkpoint file.
+    """
+    reader = pywrap_tensorflow.NewCheckpointReader(file_name)
+
+    var_list = list(reader.get_variable_to_shape_map().keys())
+
+    return var_list

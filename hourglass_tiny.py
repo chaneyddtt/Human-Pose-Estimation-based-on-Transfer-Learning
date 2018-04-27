@@ -36,7 +36,7 @@ import os
 import cv2
 
 from tqdm import tqdm
-from utils import draw_result, color_heatmap, get_max_positions
+from utils import draw_result, color_heatmap, get_max_positions, get_tensors_in_checkpoint_file
 
 
 class HourglassModel():
@@ -93,9 +93,10 @@ class HourglassModel():
         self.joints = joints
         self.w_loss = w_loss
         self.dis_name='discriminator'
-        self.model_name='hourglass_first'
+        self.model_name='hourglass'
         self.is_training = tf.placeholder(tf.bool)
         self.save_graph = save_graph
+        self.train_step = None
 
         self.init = None  # Initialization function
 
@@ -387,7 +388,7 @@ class HourglassModel():
                             self.generator_target)
 
                     # Run training
-                    losses, summaries = self._run_training(img_train, gt_train, img_train_target, gt_train_target,
+                    losses, summaries, step = self._run_training(img_train, gt_train, img_train_target, gt_train_target,
                                                            weight_train)
 
                     # Save summary (Loss + Accuracy)
@@ -396,28 +397,27 @@ class HourglassModel():
                             self.train_summary.add_summary(summary, epoch * epochSize + i)
                         self.train_summary.flush()
 
-                    if epoch * epochSize + i % 500 == 0 and epoch * epochSize + i > 0:
-                        with tf.variable_scope('save'):
-                            self.saver.save(self.Session, os.path.join(self.logdir, 'ckpt', 'model.ckpt'), epoch * epochSize + i)
+                    if step % 500 == 0 and step > 0:
+                        self.saver.save(self.Session, os.path.join(self.logdir, 'ckpt', 'model.ckpt'), step)
 
             print('Training Done')
 
     def _run_training(self, img_train, gt_train, img_train_target, gt_train_target, weight_train):
 
         if self.w_loss:
-            _, loss, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
+            _, loss, summary, step = self.Session.run([self.train_rmsprop, self.loss, self.train_op, self.train_step],
                                              feed_dict={self.img_source: img_train, self.gtMaps_source: gt_train,
                                                         self.weights: weight_train,
                                                         self.is_training: True})
         else:
-            _, loss, summary = self.Session.run([self.train_rmsprop, self.loss, self.train_op],
+            _, loss, summary, step = self.Session.run([self.train_rmsprop, self.loss, self.train_op, self.train_step],
                                              feed_dict={self.img_source: img_train, self.gtMaps_source: gt_train,
                                                         self.is_training: True})
 
         losses = [loss]
         summaries = [summary]
 
-        return losses, summaries
+        return losses, summaries, step
 
     def training_init(self, nEpochs=10, epochSize=1000, saveStep=500, load=None):
         """ Initialize the training
@@ -433,10 +433,18 @@ class HourglassModel():
                 self._init_weight()
                 self._define_saver_summary()
                 if load is not None:
-                    self.saver.restore(self.Session, load)
-                    self.test()
-                else:
-                    self._train(nEpochs, epochSize, saveStep, validIter=10)
+                    self.logger.info('Restoring from checkpoint: %s', load)
+                    checkpoint_var_names = get_tensors_in_checkpoint_file(load)
+                    model_var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+                    missing = [m.op.name for m in model_var_list if m.op.name not in checkpoint_var_names]
+                    for m in missing:
+                        self.logger.warning('Variable missing from checkpoint: %s', m)
+                    var_list = [m for m in model_var_list if m.op.name in checkpoint_var_names]
+
+                    saver = tf.train.Saver(var_list)
+                    saver.restore(self.Session, load)
+
+                self._train(nEpochs, epochSize, saveStep, validIter=10)
 
     def weighted_bce_loss(self):
         """ Create Weighted Loss Function
@@ -471,9 +479,8 @@ class HourglassModel():
         else:
             with tf.device(self.cpu):
                 self.saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=0.5)
-            if summary:
 
-                dn_prefix = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+            if summary:
                 self.logger.info('Summaries will be saved to %s' % self.logdir)
 
                 with tf.device(self.gpu):

@@ -37,7 +37,7 @@ import tensorflow.contrib.layers as tcl
 from hourglass_tiny import HourglassModel
 
 CONFUSION_WEIGHT = 0.1
-POSE_CONFUSION_WEIGHT = 0.0
+POSE_CONFUSION_WEIGHT = 0.001
 
 
 class HourglassModel_gan(HourglassModel):
@@ -167,13 +167,14 @@ class HourglassModel_gan(HourglassModel):
     def _run_training(self, img_train, gt_train, img_train_target, gt_train_target, weight_train):
 
         if self.w_loss:
-            _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
-                                                        feed_dict={self.img_source: img_train,
-                                                                   self.gtMaps_source: gt_train,
-                                                                   self.img_target: img_train_target,
-                                                                   self.gtMaps_target: gt_train_target,
-                                                                   self.weights: weight_train,
-                                                                   self.is_training: True})
+            _, loss_enc, summary_enc, step = \
+                self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc, self.train_step],
+                                  feed_dict={self.img_source: img_train,
+                                             self.gtMaps_source: gt_train,
+                                             self.img_target: img_train_target,
+                                             self.gtMaps_target: gt_train_target,
+                                             self.weights: weight_train,
+                                             self.is_training: True})
 
             for i in range(self.k):
                 _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.d_loss, self.train_op_d],
@@ -185,12 +186,13 @@ class HourglassModel_gan(HourglassModel):
                                                                    self.is_training: True})
 
         else:
-            _, loss_enc, summary_enc = self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc],
-                                                        feed_dict={self.img_source: img_train,
-                                                                   self.gtMaps_source: gt_train,
-                                                                   self.img_target: img_train_target,
-                                                                   self.gtMaps_target: gt_train_target,
-                                                                   self.is_training: True})
+            _, loss_enc, summary_enc, step = \
+                self.Session.run([self.train_rmsprop_enc, self.loss, self.train_op_enc, self.train_step],
+                                  feed_dict={self.img_source: img_train,
+                                             self.gtMaps_source: gt_train,
+                                             self.img_target: img_train_target,
+                                             self.gtMaps_target: gt_train_target,
+                                             self.is_training: True})
 
             for i in range(self.k):
                 _, loss_d, summary_d, = \
@@ -204,12 +206,12 @@ class HourglassModel_gan(HourglassModel):
         losses = [loss_enc, loss_d]
         summaries = [summary_enc, summary_d]
 
-        return losses, summaries
+        return losses, summaries, step
 
     def discriminator_pose(self, heatmap, is_training=True):
         with tf.variable_scope('discriminator_pose'):
             heatmap_small = tf.contrib.layers.max_pool2d(heatmap, [2, 2], [2, 2], padding='VALID')
-            joints_pred = tcl.spatial_softmax(heatmap_small, temperature=0.1, trainable=False)
+            joints_pred = tcl.spatial_softmax(heatmap_small, temperature=0.3, trainable=False)
             net_j = tcl.fully_connected(joints_pred, 128)
             net_j = tf.layers.dropout(net_j, rate=self.dropout_rate, training=is_training)
             net_j = tcl.fully_connected(net_j, 128)
