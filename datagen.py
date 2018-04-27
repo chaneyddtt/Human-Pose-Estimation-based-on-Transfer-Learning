@@ -136,19 +136,18 @@ class DataGenerator:
             line = line.strip()
             line = line.split(' ')
             name = line[0]
-            box = list(map(int,line[1:5]))
-            joints = list(map(int,line[5:]))
+            center = [int(l) for l in line[1:3]]
+            scale = float(line[3])
+            head_sz = float(line[4])
+            joints = list(map(float,line[5:]))
             if self.toReduce:
                 joints = self._reduce_joints(joints)
-            if joints == [-1] * len(joints):
+            if np.all(joints == -1):
                 self.no_intel.append(name)
             else:
                 joints = np.reshape(joints, (-1,2))
-                w = [1] * joints.shape[0]
-                for i in range(joints.shape[0]):
-                    if np.array_equal(joints[i], [-1,-1]):
-                        w[i] = 0
-                self.data_dict[name] = {'box' : box, 'joints' : joints, 'weights' : w}
+                w = (joints[:, 0] != -1).astype(np.int)
+                self.data_dict[name] = {'center' : center, 'scale': scale, 'head_sz': head_sz, 'joints' : joints, 'weights' : w}
                 self.train_table.append(name)
         input_file.close()
 
@@ -354,7 +353,7 @@ class DataGenerator:
 
             # Rotate + scale
             r_angle = np.random.randint(-1 * max_rotation, max_rotation)
-            scale = np.clip(random.normalvariate(1.0, 0.2), 0.5, 2.0)
+            scale = np.clip(random.normalvariate(1.0, 0.1), 0.75, 1.25)
             img = utils.rotate_about_center(img, r_angle, scale)
             hm = utils.rotate_about_center(hm, r_angle, scale)
             if mask is not None:
@@ -370,9 +369,9 @@ class DataGenerator:
 
     # ----------------------- Batch Generator ----------------------------------
 
-    def _generate_mask(self, box, padd, cbox):
-        box_2d = np.reshape(box, (2,2))
-        box_2d_cropped = self._relative_joints(cbox,padd, box_2d, to_size=64)
+    def _generate_mask(self, joints_small):
+        box_2d_cropped = np.concatenate((np.min(joints_small, axis=0, keepdims=True),
+                                        np.max(joints_small, axis=0, keepdims=True)), axis=0).astype(np.int)
         mask = np.zeros((64, 64), dtype=np.uint8)
         return cv2.rectangle(mask,
                       (box_2d_cropped[0,0], box_2d_cropped[0,1]), (box_2d_cropped[1,0], box_2d_cropped[1,1]),
@@ -400,6 +399,8 @@ class DataGenerator:
             train_gtmap = np.zeros((batch_size, stacks, 64, 64, len(self.joints_list)), np.float32)
             train_mask = np.zeros((batch_size, 64, 64), np.uint8)
             train_weights = np.zeros((batch_size, len(self.joints_list)), np.float32)
+            joint_pos = []  # For storing full res joint positions
+            head_sz_all = []
 
             for i in range(batch_size):
 
@@ -410,18 +411,29 @@ class DataGenerator:
                     return
 
                 joints = self.data_dict[name]['joints']
-                box = self.data_dict[name]['box']
-                weight = np.asarray(self.data_dict[name]['weights'])
+                weight = self.data_dict[name]['weights']
+                center = self.data_dict[name]['center']
+                scale = self.data_dict[name]['scale']
+                head_sz = self.data_dict[name]['head_sz']
+
                 train_weights[i] = weight
                 img = self.open_img(name)
-                padd, cbox = self._crop_data(img.shape[0], img.shape[1], box, joints, boxp = 0.2)
-                new_j = self._relative_joints(cbox,padd, joints, to_size=64)
-                hm = self._generate_hm(64, 64, new_j, 64, weight)
-                img = self._crop_img(img, padd, cbox)
-                img = cv2.resize(img, (256,256))
-                mask = self._generate_mask(box, padd, cbox)
+
+                # Generate crop
+                s = (256/200) / scale * 0.65
+                M = np.array([[s, 0, 128-(center[0]*s)],
+                              [0, s, 128-(center[1]*s)]], dtype=np.float64)  # Affine matrix
+                img = cv2.warpAffine(img[:, :, :], M, (256, 256))
+
+                relative_joints_full = np.dot(M, np.pad(joints.T, ((0, 1), (0, 0)), mode='constant', constant_values=1)).T
+
+                relative_joints_small = relative_joints_full / 4
+                hm = self._generate_hm(64, 64, relative_joints_small, 64, weight)
+                mask = self._generate_mask(relative_joints_small)
+
                 if sample_set == 'train':
                     img, hm, mask = self._augment(img, hm, mask)
+
                 hm = np.expand_dims(hm, axis = 0)
                 hm = np.repeat(hm, stacks, axis = 0)
                 if normalize:
@@ -430,8 +442,10 @@ class DataGenerator:
                     train_img[i] = img.astype(np.float32)
                 train_gtmap[i] = hm
                 train_mask[i,:,:] = mask
+                joint_pos.append(relative_joints_full)
+                head_sz_all.append(head_sz * s)
 
-            yield train_img, train_gtmap, train_weights, train_mask
+            yield train_img, train_gtmap, train_weights, train_mask, joint_pos, head_sz_all
 
     def generator(self, batchSize = 16, stacks = 4, norm = True, sample = 'train'):
         """ Create a Sample Generator
@@ -585,7 +599,20 @@ class DataGenerator:
 
 
 if __name__ == '__main__':
+    logging.config.fileConfig('logging.conf')
 
-    img_dir='/home/lichen/Downloads/images/'
-    train_data_file='dataset.txt'
-    data_gen=DataGenerator( img_dir=img_dir, train_data_file=train_data_file)
+    data_gen = DataGenerator(None, '/home/lichen/Downloads/HumanPose/MP2',
+                             'dataset.txt', remove_joints=None)
+    data_gen.generateSet()
+    generator_source = data_gen._aux_generator(32, 4, normalize=True, sample_set='train')
+
+    plt.figure()
+    while True:
+        imgs, b, c, _, _, sz = next(generator_source)
+        plt.figure()
+        plt.imshow(imgs[0,:,:,:]*255)
+        print('img range: ', np.min(imgs[0,:,:,:]), '-', np.max(imgs[0,:,:,:]))
+        print(sz[0])
+        plt.show()
+
+    exit()

@@ -36,6 +36,8 @@ import tensorflow.contrib.layers as tcl
 
 from hourglass_tiny import HourglassModel
 
+CONFUSION_WEIGHT = 0.2
+
 
 class HourglassModel_gan(HourglassModel):
     """ HourglassModel class: (to be renamed)
@@ -110,7 +112,9 @@ class HourglassModel_gan(HourglassModel):
                     self.p_loss = tf.reduce_mean(
                         tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
                         name='cross_entropy_loss')
-                self.loss = self.p_loss + 0.1*self.c_loss
+                self.loss = self.p_loss + CONFUSION_WEIGHT*self.c_loss
+
+            self.logger.info('Confusion weight: %f', CONFUSION_WEIGHT)
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
@@ -213,22 +217,21 @@ class HourglassModel_gan(HourglassModel):
         h1_flatten=tcl.flatten(h1)
 
         # # only use features
-        # h1_cat = h1_flatten
+        h1_cat = h1_flatten
 
         # Use also poses
-        output = tf.contrib.layers.max_pool2d(output, [2, 2], [2, 2], padding='VALID')
-        h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
-                                                num_outputs=1024,
-                                                kernel_size=[output.shape[1], output.shape[2]],
-                                                stride=1,
-                                                padding='valid',
-                                                scope='conv1_b'),
-                                                trainable=trainable,
-                                                scope="bn1_b",
-                                                is_training=is_training))
-        h1_b_flatten = tcl.flatten(h1_b)
-
-        h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
+        # output = tf.contrib.layers.max_pool2d(output, [2, 2], [2, 2], padding='VALID')
+        # h1_b = tf.nn.relu(tcl.batch_norm(tcl.conv2d(output,
+        #                                         num_outputs=1024,
+        #                                         kernel_size=[output.shape[1], output.shape[2]],
+        #                                         stride=1,
+        #                                         padding='valid',
+        #                                         scope='conv1_b'),
+        #                                         trainable=trainable,
+        #                                         scope="bn1_b",
+        #                                         is_training=is_training))
+        # h1_b_flatten = tcl.flatten(h1_b)
+        # h1_cat = tf.concat([h1_flatten, h1_b_flatten], axis=1)
 
 
         h2=tf.contrib.layers.fully_connected(h1_cat,512,scope="fc1")

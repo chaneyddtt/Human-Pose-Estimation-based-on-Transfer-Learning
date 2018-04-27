@@ -36,7 +36,7 @@ import os
 import cv2
 
 from tqdm import tqdm
-from datagen_human36 import draw_result, color_heatmap
+from utils import draw_result, color_heatmap, get_max_positions
 
 
 class HourglassModel():
@@ -293,6 +293,7 @@ class HourglassModel():
                                     self.dataset_target.data_sizes['test']]
 
                 validation_accuracies = [0] * len(validation_sources)
+                validation_pcks = [0] * len(validation_sources)
                 im_summaries = [None] * len(validation_sources)
 
                 for iVal in range(len(validation_sources)):
@@ -301,8 +302,10 @@ class HourglassModel():
                     valGen = validation_sources[iVal]
                     iValIter = 0
                     num_iter = validation_sizes[iVal] // self.valBatchSize
+                    num_below_pck05 = 0
+                    num_joints_total = 0
 
-                    for (imgs, gts, weights, mask) in tqdm(valGen, total=num_iter, leave=False):
+                    for (imgs, gts, weights, mask, joints_gt, head_sz) in tqdm(valGen, total=num_iter, leave=False):
 
                         accuracy, pred = self.Session.run([self.joint_accur, self.output_source],
                                                           feed_dict={self.img_source: imgs, self.gtMaps_source: gts,
@@ -312,6 +315,14 @@ class HourglassModel():
                         #                                                           self.gtMaps_source: gt_train_target,
                         #                                                           self.is_training: False})
                         # self.test_summary.add_summary(valid_summary, epoch * epochSize)
+
+                        # Compute PCK
+                        for i in range(pred.shape[0]):
+                            joints_pred = get_max_positions(pred[i,-1,:,:,:], imgs.shape[1]/pred.shape[2])
+                            error = np.sqrt(np.sum(np.square(joints_pred - joints_gt[i]), axis=1))/head_sz[i]
+                            num_below_pck05 += np.count_nonzero(error < 0.5)
+                            num_joints_total += len(error)
+
 
                         if iValIter == 0:
 
@@ -332,14 +343,17 @@ class HourglassModel():
 
                     pass
 
-                    # Compute accuracy
+                    # Compute accuracy and PCK
                     accuracy_array /= iValIter
                     validation_accuracies[iVal] = np.sum(accuracy_array) / len(accuracy_array)  # Convert to single scalar
-                    self.logger.info('Avg. Accuracy (%s) = %.3f%%', validation_names[iVal],
-                                     validation_accuracies[iVal] * 100)
+                    validation_pcks[iVal] = num_below_pck05/num_joints_total
+                    self.logger.info('Avg. Accuracy (%s) = %.3f%%, PCK@0.5 = %.3f%%', validation_names[iVal],
+                                     validation_accuracies[iVal] * 100, validation_pcks[iVal] * 100)
 
                 # Write to writer
                 summaries = [tf.Summary.Value(tag="acc_{}".format(validation_names[i]), simple_value=validation_accuracies[i])
+                             for i in range(len(validation_sources))] + \
+                            [tf.Summary.Value(tag="pck_{}".format(validation_names[i]), simple_value=validation_pcks[i])
                              for i in range(len(validation_sources))]
                 test_summary_to_write = tf.Summary(value=summaries)
                 self.test_summary.add_summary(test_summary_to_write, epoch * epochSize)
@@ -358,17 +372,19 @@ class HourglassModel():
 
                     # Get training data
                     try:
-                        img_train, gt_train, weight_train, _ = next(self.generator_source)
+                        img_train, gt_train, weight_train, _, _, _ = next(self.generator_source)
                     except StopIteration:
                         self.generator_source = self.dataset_source._aux_generator(self.batchSize, self.nStack,
                                                                                    randomize=True, sample_set='train')
-                        img_train, gt_train, weight_train, _ = next(self.generator_source)
+                        img_train, gt_train, weight_train, _, _, _ = next(self.generator_source)
 
                     try:
-                        img_train_target, gt_train_target, weight_target, mask_target = next(self.generator_target)
+                        img_train_target, gt_train_target, weight_target, mask_target, _, _ = next(self.generator_target)
                     except StopIteration:
                         self.generator_target = self.dataset_target._aux_generator(self.batchSize, self.nStack,
                                                                                    randomize=True, sample_set='train')
+                        img_train_target, gt_train_target, weight_target, mask_target, _, _ = next(
+                            self.generator_target)
 
                     # Run training
                     losses, summaries = self._run_training(img_train, gt_train, img_train_target, gt_train_target,
