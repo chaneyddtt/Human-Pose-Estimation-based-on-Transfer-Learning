@@ -36,9 +36,6 @@ import tensorflow.contrib.layers as tcl
 
 from hourglass_tiny import HourglassModel
 
-CONFUSION_WEIGHT = 0.1
-POSE_CONFUSION_WEIGHT = 0.001
-
 
 class HourglassModel_gan(HourglassModel):
     """ HourglassModel class: (to be renamed)
@@ -47,8 +44,10 @@ class HourglassModel_gan(HourglassModel):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        self.lambdas = [0.01, 0.001] if kwargs['lambdas'] is None else kwargs['lambdas']
         self.k = 5  # Number of times to train discriminator before a single step of update
+        del kwargs['lambdas']
+        super().__init__(**kwargs)
 
     def generate_model(self):
         """ Create the complete graph
@@ -86,12 +85,14 @@ class HourglassModel_gan(HourglassModel):
                 d_enc_source = self.discriminator(enc_repre_source_flattened,
                                                   trainable=True,
                                                   is_training=self.is_training)
-                d_pose_source, _ = self.discriminator_pose(gt_source_flattened, is_training=self.is_training)
+                if self.lambdas[1] > 0:
+                    d_pose_source, _ = self.discriminator_pose(gt_source_flattened, is_training=self.is_training)
             with tf.variable_scope(self.dis_name,reuse=True):
                 d_enc_target = self.discriminator(enc_repre_target_flattened,
                                                   trainable=True,
                                                   is_training=self.is_training)
-                d_pose_target, _ = self.discriminator_pose(output_target_flattened, is_training=self.is_training)
+                if self.lambdas[1] > 0:
+                    d_pose_target, _ = self.discriminator_pose(output_target_flattened, is_training=self.is_training)
 
             # Discriminator loss
             d_groundtruth = tf.concat([tf.zeros_like(d_enc_source), tf.ones_like(d_enc_target)], axis=0)
@@ -99,26 +100,32 @@ class HourglassModel_gan(HourglassModel):
             d_enc_logits = tf.concat([d_enc_source, d_enc_target], axis=0)
             d_enc_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_enc_logits))
             # # 2. Pose
-            d_pose_logits = tf.concat([d_pose_source, d_pose_target], axis=0)
-            d_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_pose_logits))
-            # Sum
-            self.d_loss = CONFUSION_WEIGHT * d_enc_loss + POSE_CONFUSION_WEIGHT * d_pose_loss
+            if self.lambdas[1] > 0:
+                d_pose_logits = tf.concat([d_pose_source, d_pose_target], axis=0)
+                d_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_pose_logits))
+                self.d_loss = self.lambdas[0] * d_enc_loss + self.lambdas[1] * d_pose_loss
+            else:
+                self.d_loss = self.lambdas[0] * d_enc_loss
 
             # Confusion loss
             c_desired = tf.fill(tf.shape(d_groundtruth), 0.5)  # Uniform distribution
             c_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_enc_logits))
-            c_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_pose_logits))
+            if self.lambdas[1] > 0:
+                c_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_pose_logits))
+            else:
+                c_pose_loss = 0
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
-                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')+0.01*c_loss
+                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss') + \
+                                  self.lambdas[0]*c_loss + self.lambdas[1] * c_pose_loss
                 else:
                     self.p_loss = tf.reduce_mean(
                         tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
                         name='cross_entropy_loss')
-                self.loss = self.p_loss + CONFUSION_WEIGHT * c_loss + POSE_CONFUSION_WEIGHT * c_pose_loss
+                self.loss = self.p_loss + self.lambdas[0] * c_loss + self.lambdas[1] * c_pose_loss
 
-            self.logger.info('Confusion weight: %f (enc), %f (pose)', CONFUSION_WEIGHT, POSE_CONFUSION_WEIGHT)
+            self.logger.info('Confusion weight: %f (enc), %f (pose)', self.lambdas[0], self.lambdas[1])
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):

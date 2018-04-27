@@ -50,6 +50,7 @@ def make_dir_if_not_exist(path):
 # argparse
 parse = argparse.ArgumentParser()
 parse.add_argument("--network", help="choose a network", default='hourglass_gan', type=str)
+parse.add_argument("--lambdas", help="Weighting for feature encoding and pose discrimation", default=None, nargs='+', type=float)
 parse.add_argument("--gpu", help="Select GPU (default: 0)", default=0, type=int)
 parse.add_argument("--name", help="Name of run (used to name tf.Summary)", default='', type=str)
 parse.add_argument("--no_save_graph", help="If set, graph will not be save in tf summaries (speeds up init)", action='store_true')
@@ -132,6 +133,7 @@ if __name__ == '__main__':
                                    drop_rate=params['dropout_rate'], lear_rate=params['learning_rate'],
                                    decay=params['learning_rate_decay'], decay_step=params['decay_step'],
                                    dataset_source=dataset_source, dataset_target=dataset_target,
+                                   lambdas=args.lambdas,
                                    name=params['name'], logdir=logdir,
                                    w_loss=params['weighted_loss'],
                                    joints=params['joint_list'], save_graph=(not args.no_save_graph), gpu=args.gpu)

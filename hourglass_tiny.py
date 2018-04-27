@@ -259,6 +259,9 @@ class HourglassModel():
     def _train(self, nEpochs=10, epochSize=1000, saveStep=500, validIter=10):
         """
         """
+        step = self.Session.run(self.train_step)
+        self.logger.info('Starting at step %i', step)
+
         with tf.variable_scope('Train'):
 
             self.dataset_source.generateSet()
@@ -357,10 +360,10 @@ class HourglassModel():
                             [tf.Summary.Value(tag="pck_{}".format(validation_names[i]), simple_value=validation_pcks[i])
                              for i in range(len(validation_sources))]
                 test_summary_to_write = tf.Summary(value=summaries)
-                self.test_summary.add_summary(test_summary_to_write, epoch * epochSize)
+                self.test_summary.add_summary(test_summary_to_write, step)
                 for im_summary in im_summaries:
                     for topic in im_summary:
-                        self.test_summary.add_summary(topic, epoch * epochSize)
+                        self.test_summary.add_summary(topic, step)
                 self.test_summary.flush()
 
                 '''
@@ -394,7 +397,7 @@ class HourglassModel():
                     # Save summary (Loss + Accuracy)
                     if i % 20 == 0:
                         for summary in summaries:
-                            self.train_summary.add_summary(summary, epoch * epochSize + i)
+                            self.train_summary.add_summary(summary, step)
                         self.train_summary.flush()
 
                     if step % 500 == 0 and step > 0:
