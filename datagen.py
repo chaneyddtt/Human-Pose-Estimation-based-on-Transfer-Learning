@@ -224,22 +224,68 @@ class DataGenerator:
 
     # ---------------------------- Generating Methods --------------------------
 
-
-    def _makeGaussian(self, height, width, sigma = 3, center=None):
-        """ Make a square gaussian kernel.
+    def _makeGaussian(self, height, width, sigma = 1, center=None):
+        """ Make a square gaussian kernel with sigma 1
         size is the length of a side of the square
         sigma is full-width-half-maximum, which
         can be thought of as an effective radius.
         """
-        x = np.arange(0, width, 1, float)
-        y = np.arange(0, height, 1, float)[:, np.newaxis]
-        if center is None:
-            x0 =  width // 2
-            y0 = height // 2
-        else:
-            x0 = center[0]
-            y0 = center[1]
-        return np.exp(-4*np.log(2) * ((x-x0)**2 + (y-y0)**2) / sigma**2)
+        assert sigma == 1
+        rc_cen = np.array([center[1], center[0]], dtype=np.int64)
+
+        # kernel = np.array(
+        #     [[1.96519161240319e-05, 0.000239409349497270, 0.00107295826497866, 0.00176900911404382, 0.00107295826497866,
+        #       0.000239409349497270, 1.96519161240319e-05],
+        #      [0.000239409349497270, 0.00291660295438644, 0.0130713075831894, 0.0215509428482683, 0.0130713075831894,
+        #       0.00291660295438644, 0.000239409349497270],
+        #      [0.00107295826497866, 0.0130713075831894, 0.0585815363306070, 0.0965846250185641, 0.0585815363306070,
+        #       0.0130713075831894, 0.00107295826497866],
+        #      [0.00176900911404382, 0.0215509428482683, 0.0965846250185641, 0.159241125690702, 0.0965846250185641,
+        #       0.0215509428482683, 0.00176900911404382],
+        #      [0.00107295826497866, 0.0130713075831894, 0.0585815363306070, 0.0965846250185641, 0.0585815363306070,
+        #       0.0130713075831894, 0.00107295826497866],
+        #      [0.000239409349497270, 0.00291660295438644, 0.0130713075831894, 0.0215509428482683, 0.0130713075831894,
+        #       0.00291660295438644, 0.000239409349497270],
+        #      [1.96519161240319e-05, 0.000239409349497270, 0.00107295826497866, 0.00176900911404382, 0.00107295826497866,
+        #       0.000239409349497270, 1.96519161240319e-05]],
+        #     dtype=np.float32)
+        kernel = np.array(
+            [[0.000123409804086680, 0.00150343919297757, 0.00673794699908547, 0.0111089965382423, 0.00673794699908547,
+              0.00150343919297757, 0.000123409804086680],
+             [0.00150343919297757, 0.0183156388887342, 0.0820849986238988, 0.135335283236613, 0.0820849986238988,
+              0.0183156388887342, 0.00150343919297757],
+             [0.00673794699908547, 0.0820849986238988, 0.367879441171442, 0.606530659712633, 0.367879441171442,
+              0.0820849986238988, 0.00673794699908547],
+             [0.0111089965382423, 0.135335283236613, 0.606530659712633, 1, 0.606530659712633, 0.135335283236613,
+              0.0111089965382423],
+             [0.00673794699908547, 0.0820849986238988, 0.367879441171442, 0.606530659712633, 0.367879441171442,
+              0.0820849986238988, 0.00673794699908547],
+             [0.00150343919297757, 0.0183156388887342, 0.0820849986238988, 0.135335283236613, 0.0820849986238988,
+              0.0183156388887342, 0.00150343919297757],
+             [0.000123409804086680, 0.00150343919297757, 0.00673794699908547, 0.0111089965382423, 0.00673794699908547,
+              0.00150343919297757, 0.000123409804086680]],
+            dtype=np.float32
+        )
+
+        kernel_sz = np.array(kernel.shape)
+        kernel_sz_half = (0.5 * (kernel_sz - 1)).astype(np.int64)
+
+        dst = np.zeros((height, width), np.float32)
+
+        dst_tl = rc_cen - kernel_sz_half
+        dst_br = rc_cen + kernel_sz_half + 1
+        clip_tl = np.maximum(-dst_tl, 0)
+        clip_br = np.maximum(dst_br - np.array([height, width]), 0)
+
+        dst_tl2 = dst_tl + clip_tl
+        dst_br2 = np.maximum(dst_br - clip_br, 0)
+        kernel_tl = clip_tl
+        kernel_br = np.maximum(kernel_sz - clip_br, 0)
+
+        dst[dst_tl2[0]:dst_br2[0], dst_tl2[1]:dst_br2[1]] = \
+            kernel[kernel_tl[0]:kernel_br[0], kernel_tl[1]:kernel_br[1]]
+
+        return dst
 
     def _generate_hm(self, height, width ,joints, maxlenght, weight):
         """ Generate a full Heap Map for every joints in an array
@@ -253,8 +299,9 @@ class DataGenerator:
         hm = np.zeros((height, width, num_joints), dtype = np.float32)
         for i in range(num_joints):
             if not(np.array_equal(joints[i], [-1,-1])) and weight[i] == 1:
-                s = int(np.sqrt(maxlenght) * maxlenght * 10 / 4096) + 2
-                hm[:,:,i] = self._makeGaussian(height, width, sigma= s, center= (joints[i,0], joints[i,1]))
+                # s = int(np.sqrt(maxlenght) * maxlenght * 10 / 4096) + 2
+                s = 1
+                hm[:,:,i] = self._makeGaussian(height, width, sigma=s, center=(joints[i,0], joints[i,1]))
             else:
                 hm[:,:,i] = np.zeros((height,width))
         return hm

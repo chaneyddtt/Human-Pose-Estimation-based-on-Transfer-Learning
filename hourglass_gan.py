@@ -78,54 +78,47 @@ class HourglassModel_gan(HourglassModel):
             # enc_repre_target_flattened = enc_repre_target[-1]
             enc_repre_source_flattened = tf.concat(enc_repre_source, axis=3)
             enc_repre_target_flattened = tf.concat(enc_repre_target, axis=3)
-            gt_source_flattened = self.gtMaps_source[:, -1, :, :, :]
-            output_target_flattened = self.output_target[:, -1, :, :, :]
 
+            # Discriminator
             with tf.variable_scope(self.dis_name):
                 d_enc_source = self.discriminator(enc_repre_source_flattened,
                                                   trainable=True,
                                                   is_training=self.is_training)
-                if self.lambdas[1] > 0:
-                    d_pose_source, self.pose_source_op = self.discriminator_pose(gt_source_flattened*10, is_training=self.is_training) #TODO REplace with hardmax
+
             with tf.variable_scope(self.dis_name,reuse=True):
                 d_enc_target = self.discriminator(enc_repre_target_flattened,
                                                   trainable=True,
                                                   is_training=self.is_training)
-                if self.lambdas[1] > 0:
-                    d_pose_target, _ = self.discriminator_pose(output_target_flattened, is_training=self.is_training)
-
+            # Adversarial learning
             # Discriminator loss
             d_groundtruth = tf.concat([tf.zeros_like(d_enc_source), tf.ones_like(d_enc_target)], axis=0)
-            # 1. Encoding
             d_enc_logits = tf.concat([d_enc_source, d_enc_target], axis=0)
-            d_enc_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_enc_logits))
-            # # 2. Pose
-            if self.lambdas[1] > 0:
-                d_pose_logits = tf.concat([d_pose_source, d_pose_target], axis=0)
-                d_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_pose_logits))
-                self.d_loss = self.lambdas[0] * d_enc_loss + self.lambdas[1] * d_pose_loss
-            else:
-                self.d_loss = self.lambdas[0] * d_enc_loss
-
+            d_enc_loss = tf.reduce_mean(
+                tf.nn.sigmoid_cross_entropy_with_logits(labels=d_groundtruth, logits=d_enc_logits))
+            self.d_loss = self.lambdas[0] * d_enc_loss
             # Confusion loss
             c_desired = tf.fill(tf.shape(d_groundtruth), 0.5)  # Uniform distribution
             c_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_enc_logits))
+
+            # Pose
             if self.lambdas[1] > 0:
-                c_pose_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=c_desired, logits=d_pose_logits))
-            else:
-                c_pose_loss = 0
+                # joints_pred = self.predict_joints(self.output_target[:, -1, :, :, :])
+                joints_pred = self.predict_joints(self.gtMaps_source[:, -1, :, :, :])  # Note: predicted joints are in rows, cols. Top left is (-1,-1)
+                self.joints_pred = joints_pred
+                # 9 - head, 8 - neck, 7 - thorax, 6 - pelvis
+                self.joint_cost = tf.maximum(0.0, joints_pred[:, 9, 0] - joints_pred[:, 8, 0]) + \
+                                  tf.maximum(0.0, joints_pred[:, 8, 0] - joints_pred[:, 7, 0]) + \
+                                  tf.maximum(0.0, joints_pred[:, 7, 0] - joints_pred[:, 6, 0])
+                self.joint_loss = tf.reduce_mean(self.joint_cost)
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
-                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss') + \
-                                  self.lambdas[0]*c_loss + self.lambdas[1] * c_pose_loss
+                    self.p_loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')
                 else:
-                    self.p_loss = tf.reduce_mean(
-                        tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
-                        name='cross_entropy_loss')
-                self.loss = self.p_loss + self.lambdas[0] * c_loss + self.lambdas[1] * c_pose_loss
+                    self.p_loss = tf.losses.mean_squared_error(self.gtMaps_source, self.output_source, scope='mse')
+                self.loss = self.p_loss + self.lambdas[0] * c_loss + self.lambdas[1] * self.joint_loss
 
-            self.logger.info('Confusion weight: %f (enc), %f (pose)', self.lambdas[0], self.lambdas[1])
+            self.logger.info('Auxiliary weights: %f (enc), %f (pose)', self.lambdas[0], self.lambdas[1])
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
@@ -208,6 +201,18 @@ class HourglassModel_gan(HourglassModel):
                                              self.gtMaps_target: gt_train_target,
                                              self.is_training: True})
 
+            # np.unravel_index(np.argmax(gt_train[0,0,:,:,3]), (64,64))
+            #
+            # joint_pred, joint_cost = self.Session.run([self.joints_pred, self.joint_cost],
+            #                  feed_dict={self.img_source: img_train,
+            #                             self.gtMaps_source: gt_train,
+            #                             self.img_target: img_train_target,
+            #                             self.gtMaps_target: gt_train_target,
+            #                             self.is_training: True})
+            # plt.figure()
+            # plt.imshow(np.sum(gt_train[0,0,:,:], axis=2))
+            # plt.show()
+
             for i in range(self.k):
                 _, loss_d, summary_d, = \
                     self.Session.run([self.train_rmsprop_d, self.d_loss, self.train_op_d],
@@ -221,6 +226,11 @@ class HourglassModel_gan(HourglassModel):
         summaries = [summary_enc, summary_d]
 
         return losses, summaries, step
+
+    def predict_joints(self, heatmap, is_Training=True):
+        joints_pred = tcl.spatial_softmax(heatmap, temperature=0.1, trainable=False)
+        joints_pred = tf.reshape(joints_pred, (tf.shape(joints_pred)[0], 16, 2))
+        return joints_pred
 
     def discriminator_pose(self, heatmap, is_training=True):
         with tf.variable_scope('discriminator_pose'):

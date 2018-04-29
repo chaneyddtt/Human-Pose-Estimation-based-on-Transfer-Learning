@@ -184,10 +184,9 @@ class HourglassModel():
             with tf.variable_scope('loss'):
                 if self.w_loss:
                     self.loss = tf.reduce_mean(self.weighted_bce_loss(), name='reduced_loss')
+                    raise NotImplementedError()
                 else:
-                    self.loss = tf.reduce_mean(
-                        tf.nn.sigmoid_cross_entropy_with_logits(logits=self.output_source, labels=self.gtMaps_source),
-                        name='cross_entropy_loss')
+                    self.loss = tf.losses.mean_squared_error(self.gtMaps_source, self.output_source, scope='mse')
 
         with tf.device(self.cpu):
             with tf.variable_scope('accuracy'):
@@ -199,7 +198,8 @@ class HourglassModel():
                                                      staircase=True, name='learning_rate')
         with tf.device(self.gpu):
             with tf.variable_scope('rmsprop'):
-                self.rmsprop = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+                # self.rmsprop = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+                self.rmsprop = tf.train.AdamOptimizer(learning_rate=self.lr)
             with tf.variable_scope('minimizer'):
                 self.update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 with tf.control_dependencies(self.update_ops):
@@ -248,7 +248,7 @@ class HourglassModel():
 
         for j in range(img.shape[0]):
             overlays.append(draw_result(img[j, :, :, :], pred[j, 0, :, :, :], gt[j, 0, :, :, :]))
-            heatmaps.append(color_heatmap(pred[j, 0, :, :, :], width_height, apply_sigmoid=True))
+            heatmaps.append(color_heatmap(pred[j, 0, :, :, :], width_height, apply_sigmoid=False))
 
         overlays = np.stack(overlays, axis=0)
         heatmaps = np.stack(heatmaps, axis=0)
@@ -562,6 +562,7 @@ class HourglassModel():
                     ll[i] = self._conv_bn_relu(drop[i], self.nFeat, 1, 1, 'VALID', name='conv')
 
                     out[i] = self._conv(ll[i], self.outDim, 1, 1, 'VALID', 'out')
+                    out[i] = tf.nn.sigmoid(out[i])
 
                     if i < self.nStack-1:
                         ll_[i] = self._conv(ll[i], self.nFeat, 1, 1, 'VALID', 'll')
