@@ -86,7 +86,7 @@ class HourglassModel_gan(HourglassModel):
                                                   trainable=True,
                                                   is_training=self.is_training)
                 if self.lambdas[1] > 0:
-                    d_pose_source, _ = self.discriminator_pose(gt_source_flattened, is_training=self.is_training)
+                    d_pose_source, self.pose_source_op = self.discriminator_pose(gt_source_flattened*10, is_training=self.is_training) #TODO REplace with hardmax
             with tf.variable_scope(self.dis_name,reuse=True):
                 d_enc_target = self.discriminator(enc_repre_target_flattened,
                                                   trainable=True,
@@ -182,6 +182,13 @@ class HourglassModel_gan(HourglassModel):
                                              self.gtMaps_target: gt_train_target,
                                              self.weights: weight_train,
                                              self.is_training: True})
+            pose_sm = self.Session.run(self.pose_source_op, feed_dict={self.img_source: img_train,
+                                             self.gtMaps_source: gt_train,
+                                             self.img_target: img_train_target,
+                                             self.gtMaps_target: gt_train_target,
+                                             self.is_training: True})
+
+            np.unravel_index(np.argmax(gt_train[0,0,:,:,0]), (64,64))
 
             for i in range(self.k):
                 _, loss_d, summary_d = self.Session.run([self.train_rmsprop_d, self.d_loss, self.train_op_d],
@@ -218,7 +225,7 @@ class HourglassModel_gan(HourglassModel):
     def discriminator_pose(self, heatmap, is_training=True):
         with tf.variable_scope('discriminator_pose'):
             heatmap_small = tf.contrib.layers.max_pool2d(heatmap, [2, 2], [2, 2], padding='VALID')
-            joints_pred = tcl.spatial_softmax(heatmap_small, temperature=0.3, trainable=False)
+            joints_pred = tcl.spatial_softmax(heatmap_small, temperature=0.1, trainable=False)
             net_j = tcl.fully_connected(joints_pred, 128)
             net_j = tf.layers.dropout(net_j, rate=self.dropout_rate, training=is_training)
             net_j = tcl.fully_connected(net_j, 128)

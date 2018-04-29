@@ -481,7 +481,7 @@ class HourglassModel():
             raise ValueError('Train/Test directory not assigned')
         else:
             with tf.device(self.cpu):
-                self.saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=0.5)
+                self.saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=1)
 
             if summary:
                 self.logger.info('Summaries will be saved to %s' % self.logdir)
