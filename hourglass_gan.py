@@ -110,6 +110,8 @@ class HourglassModel_gan(HourglassModel):
                                   tf.maximum(0.0, joints_pred[:, 8, 0] - joints_pred[:, 7, 0]) + \
                                   tf.maximum(0.0, joints_pred[:, 7, 0] - joints_pred[:, 6, 0])
                 self.joint_loss = tf.reduce_mean(self.joint_cost)
+            else:
+                self.joint_loss = 0
 
             with tf.variable_scope('loss'):
                 if self.w_loss:
@@ -130,8 +132,10 @@ class HourglassModel_gan(HourglassModel):
                                                      staircase=True, name='learning_rate')
         with tf.device(self.gpu):
             with tf.variable_scope('rmsprop'):
-                self.rmsprop_enc = tf.train.RMSPropOptimizer(learning_rate=self.lr)
-                self.rmsprop_d = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+                # self.rmsprop_enc = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+                # self.rmsprop_d = tf.train.RMSPropOptimizer(learning_rate=self.lr)
+                self.rmsprop_enc = tf.train.AdamOptimizer(learning_rate=self.lr)
+                self.rmsprop_d = tf.train.AdamOptimizer(learning_rate=self.lr)
             with tf.variable_scope('minimizer'):
                 update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
                 with tf.control_dependencies(update_ops):
